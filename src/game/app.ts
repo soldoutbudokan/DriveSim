@@ -12,7 +12,9 @@ import { Menus } from '../ui/menus';
 import { loadSettings, saveSettings, type Settings } from './settings';
 import { LessonRunner } from './lessonRunner';
 import { LESSONS, MOCK_TEST_CARD } from '../scenarios/lessons';
-import { loadProgress } from './progress';
+import { loadProgress, saveProgress } from './progress';
+import { Examiner } from '../examiner/examiner';
+import type { ExamReport } from '../scoring/rubric';
 
 export type Mode = 'menu' | 'free' | 'lesson' | 'exam' | 'replay';
 
@@ -25,6 +27,8 @@ export class GameApp {
   settings: Settings;
   mode: Mode = 'menu';
   readonly lessonRunner: LessonRunner;
+  readonly examiner: Examiner;
+  lastReport: ExamReport | null = null;
 
   /** Per-mode tick extensions (lesson runner, examiner, replay). */
   modeTick: ((dt: number) => void) | null = null;
@@ -42,6 +46,12 @@ export class GameApp {
     this.menus = new Menus(uiEl);
     this.settings = loadSettings();
     this.lessonRunner = new LessonRunner(this);
+    this.examiner = new Examiner(this);
+    this.examiner.onReport = (r) => this.showExamReport(r, true);
+    // the examiner's pencil scratches when a fault is logged silently
+    this.engine.events.on('fault', () => {
+      if (this.mode === 'exam') this.engine.audio.click(380, 0.035);
+    });
 
     this.engine.buildPlayer(this.settings.carColor);
     this.applySettings();
@@ -128,10 +138,101 @@ export class GameApp {
       () => this.showMainMenu(),
     );
   };
-  openExam: () => void = () => this.engine.hud.toast('Examiner mode is being prepared.', 'info');
+  openExam: () => void = () => {
+    const el = this.menus.showCustom(`
+      <h1>Mock G Road Test</h1>
+      <p class="dim">A full DriveTest-style examination. The examiner gives spoken directions and grades
+      <b>silently</b> — no coaching. The route covers city streets, the roundabout, the school zone,
+      a roadside stop, the hill, parallel parking, a three-point turn, and Highway 401.</p>
+      <h2>Remember</h2>
+      <p class="dim">Mirror checks (M) every ~10 s · shoulder checks (, .) before every lane change and merge ·
+      signal 3 s early (Q/E) · full stops behind the line · 2–3 s following gap · match traffic speed when merging.
+      Collisions and dangerous actions end the test.</p>
+      <div class="row" style="margin-top:18px">
+        <button class="btn primary" id="begin">Begin the test</button>
+        <button class="btn ghost" id="back">Back</button>
+      </div>
+    `);
+    (el.querySelector('#begin') as HTMLElement).onclick = () => this.examiner.start();
+    (el.querySelector('#back') as HTMLElement).onclick = () => this.showMainMenu();
+  };
   openReplays: () => void = () => this.engine.hud.toast('No replays yet.', 'info');
   openDashboard: () => void = () => this.engine.hud.toast('Drive first — telemetry follows.', 'info');
   openProfiles: () => void = () => {};
+
+  showExamReport(r: ExamReport, save: boolean): void {
+    if (save) {
+      this.mode = 'menu';
+      this.lastReport = r;
+      const progress = loadProgress();
+      progress.exams.push({ at: r.at, score: r.overall, passed: r.passed });
+      saveProgress(progress);
+    }
+    const catRows = r.categories
+      .map(
+        (c) => `
+      <div class="cat-row">
+        <span class="name">${c.label}</span>
+        <div class="bar"><i style="width:${c.score}%; background:${c.score >= 85 ? 'var(--good)' : c.score >= 60 ? 'var(--warn)' : 'var(--bad)'}"></i></div>
+        <span class="pct">${c.score}%</span>
+      </div>`,
+      )
+      .join('');
+    const t0 = r.faults.length ? r.faults[0].time : 0;
+    void t0;
+    const start = r.at;
+    void start;
+    const faultRows = r.faults.length
+      ? r.faults
+          .map(
+            (f) =>
+              `<li class="${f.severity}"><span class="t">${fmtClock(f.time)}</span><span class="sev">${f.severity}</span>${f.message}</li>`,
+          )
+          .join('')
+      : '<li class="minor"><span class="sev" style="color:var(--good)">clean</span>No faults recorded.</li>';
+    const recs = r.recommendations.length
+      ? r.recommendations
+          .map(
+            (rec, i) =>
+              `<div class="card" data-lesson="${rec.lessonId}"><h3>${i + 1}. ${rec.title}</h3><p>${rec.reason}</p></div>`,
+          )
+          .join('')
+      : '<p class="dim">Nothing specific — keep your habits sharp and retake any time.</p>';
+
+    const el = this.menus.showCustom(`
+      <div class="spread">
+        <div>
+          <h1>${r.passed ? '✅ PASS' : '❌ FAIL'} — Mock G Road Test</h1>
+          <p class="dim">${Math.round(r.durationS / 60)} min · ${r.distanceKm.toFixed(1)} km · observation score ${r.observationScore}
+          ${r.autoFail ? ` · <b style="color:var(--bad)">automatic fail: ${r.autoFail.message}</b>` : ''}
+          ${!r.autoFail && r.dangerous.length ? ` · <b style="color:var(--bad)">dangerous action recorded</b>` : ''}</p>
+        </div>
+        <div class="score-big ${r.passed ? 'pass' : 'fail'}">${r.overall}%</div>
+      </div>
+      <h2>Assessment areas</h2>
+      ${catRows}
+      <h2>Fault log (${r.faults.length})</h2>
+      <ul class="fault-list">${faultRows}</ul>
+      <h2>Work on these next</h2>
+      <div class="card-grid">${recs}</div>
+      <div class="row" style="margin-top:20px">
+        <button class="btn primary" id="retake">Retake the test</button>
+        <button class="btn" id="replayBtn">Watch replay</button>
+        <button class="btn" id="dash">Telemetry</button>
+        <button class="btn ghost" id="menu">Main menu</button>
+      </div>
+    `);
+    el.querySelectorAll<HTMLElement>('[data-lesson]').forEach((card) => {
+      card.onclick = () => {
+        const lesson = LESSONS.find((l) => l.id === card.dataset.lesson);
+        if (lesson) this.lessonRunner.start(lesson);
+      };
+    });
+    (el.querySelector('#retake') as HTMLElement).onclick = () => this.openExam();
+    (el.querySelector('#replayBtn') as HTMLElement).onclick = () => this.openReplays();
+    (el.querySelector('#dash') as HTMLElement).onclick = () => this.openDashboard();
+    (el.querySelector('#menu') as HTMLElement).onclick = () => this.showMainMenu();
+  }
   menuStats: () => { profile: string; bestExam: string; lessonsDone: number; lessonsTotal: number } = () => {
     const progress = loadProgress();
     const done = LESSONS.filter((l) => progress.lessons[l.id]?.completed).length;
@@ -224,4 +325,10 @@ export class GameApp {
   }
 
   private lastCarColor = -1;
+}
+
+function fmtClock(s: number): string {
+  const m = Math.floor(s / 60);
+  const ss = Math.floor(s % 60);
+  return `${m}:${String(ss).padStart(2, '0')}`;
 }
