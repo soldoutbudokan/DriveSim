@@ -99,9 +99,13 @@ src/
   ui/          HUD, minimap, menus, report card, styles
 ```
 
-**Physics**: a dynamic single-track (bicycle) model — Pacejka lateral forces per axle, longitudinal/lateral combination through a friction circle (throttle-on understeer, handbrake oversteer emerge naturally), longitudinal weight transfer feeding axle loads, surface/weather grip multipliers, road-grade forces (hills genuinely roll back), kinematic blending below ~3.5 m/s for parking-speed sanity, 240 Hz substeps.
+**Rendering & look**: no 3D assets — vehicles are beveled, extruded side-profile shells (per-silhouette sedan/hatch/SUV, rounded shells for buses, trucks and the streetcar) with inset glass greenhouses and wheel-arch shadows, lit by ACES tone mapping + image-based reflections (PMREM `RoomEnvironment`, intensity tracking the day/night cycle) and bloom at high quality tiers. Roads carry the full Ontario paint set — double-yellow centrelines, dashed white lane dividers, solid edge lines, stop bars, zebra crosswalks, yield teeth, HOV diamonds — over canvas-generated asphalt (aggregate, patch scars, cracks), with raised curbs, slab-jointed concrete sidewalks, textured grass, layered blob-crown trees and rooftop AC clutter on the towers.
+
+**Physics**: a dynamic single-track (bicycle) model — Pacejka lateral forces per axle, longitudinal/lateral combination through a friction circle (throttle-on understeer, handbrake oversteer emerge naturally), longitudinal weight transfer feeding axle loads, surface/weather grip multipliers, road-grade forces (hills genuinely roll back), kinematic blending below ~3.5 m/s for parking-speed sanity, 240 Hz substeps. The trainer car is tuned to driving-school spec: keyboard throttle/steering ramp in gradually, steering authority falls off with speed so you can hold a lane centre at 50 km/h, and a comfort governor caps a floored launch around 0.38 g — brisk, but under the examiner's harsh-acceleration line.
 
 **Traffic**: Intelligent Driver Model car-following over lane polylines with per-lane occupancy, signal obedience including amber dilemma decisions and RTOR, all-way arrival queues (the player participates), gap-accepted lane changes & mandatory merges, and right-of-way primitives shared with the coaching engine.
+
+**Examiner fairness**: smoothness and lane-keeping faults are debounced the way a human examiner perceives them — harsh acceleration needs a *sustained* 0.42 g (brief shift/grade spikes don't count), lane drift and straddling have generous deadbands with dwell times, and repositioning with your indicator on is judged by the lane-change rules rather than flagged as weaving.
 
 ## Roadmap
 
