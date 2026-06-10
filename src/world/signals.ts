@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import type { RoadNetwork, NodeRT } from './network';
 import { compassOf } from './network';
+import { signTexture } from './textures';
 
 export type Compass = 'N' | 'S' | 'E' | 'W';
 
@@ -149,8 +150,8 @@ export class SignalSystem {
       this.group.add(lamp);
       this.pxoBeacons.push(beacon);
       const sign = new THREE.Mesh(
-        new THREE.BoxGeometry(0.7, 0.7, 0.06),
-        new THREE.MeshStandardMaterial({ color: 0xf3f4f6, roughness: 0.6 }),
+        new THREE.PlaneGeometry(0.74, 0.74),
+        new THREE.MeshStandardMaterial({ map: signTexture('pxo'), roughness: 0.55, side: THREE.DoubleSide }),
       );
       sign.position.set(px, 3.6, pz);
       sign.rotation.y = heading + Math.PI / 2;

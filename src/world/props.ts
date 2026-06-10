@@ -12,7 +12,7 @@ import { mulberry32, polylineAt, type V2 } from '../core/math';
 import type { CollisionWorld, CircleCollider } from '../physics/collision';
 import { buildCar, bodyMat, type BuiltCar } from '../vehicle/carFactory';
 import { LANE_W, RoadNetwork, SIDEWALK_W } from './network';
-import { PARKING_BAYS, LOT_RECT, ZONES, MANEUVERS, STREETCAR_STOPS, PXO } from './map';
+import { PARKING_BAYS, LOT_RECT, ZONES, STREETCAR_STOPS } from './map';
 import { buildingTexture, signTexture, streetBladeTexture, type SignKind } from './textures';
 
 export interface Cone {
@@ -515,10 +515,6 @@ export function buildProps(net: RoadNetwork, collision: CollisionWorld, seed = 2
   dtc.castShadow = true;
   group.add(dtc);
   addBuildingCollider(-620, -445, 34, 14);
-
-  /* ---------------- maneuver helper paint (roadside stop marker) -------- */
-  void MANEUVERS;
-  void PXO;
 
   const setNight = (f: number): void => {
     for (const m of windowMats) m.emissiveIntensity = f * 1.1;
