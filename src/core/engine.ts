@@ -14,6 +14,8 @@ import { buildCar, CarVisual } from '../vehicle/carFactory';
 import { CameraRig } from '../camera/rig';
 import { AudioManager } from '../audio/audio';
 import { Hud } from '../ui/hud';
+import { Minimap, type MinimapMarker } from '../ui/minimap';
+import type { RoadNetwork } from '../world/network';
 import type { CollisionWorld } from '../physics/collision';
 import { carOBB } from '../physics/collision';
 
@@ -55,6 +57,10 @@ export class Engine {
   playerVisual!: CarVisual;
   headlightL!: THREE.SpotLight;
   headlightR!: THREE.SpotLight;
+  minimap: Minimap | null = null;
+  /** Overlays drawn on the minimap (examiner route, lesson markers). */
+  routeOverlay: { x: number; z: number }[] | null = null;
+  mapMarkers: MinimapMarker[] = [];
 
   readonly sun: THREE.DirectionalLight;
   readonly hemi: THREE.HemisphereLight;
@@ -130,6 +136,10 @@ export class Engine {
     if (this.world) this.scene.remove(this.world.group);
     this.world = world;
     this.scene.add(world.group);
+  }
+
+  attachMinimap(net: RoadNetwork): void {
+    this.minimap = new Minimap(net, this.hud.minimapCanvas);
   }
 
   buildPlayer(color = 0x2f6fce): void {
@@ -426,6 +436,8 @@ export class Engine {
       street: loc.street,
       area: loc.area,
     });
+
+    this.minimap?.update({ x: v.x, z: v.z, heading: v.heading }, this.routeOverlay ?? undefined, this.mapMarkers);
 
     // main render
     this.renderer.setScissorTest(false);

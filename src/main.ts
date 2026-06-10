@@ -1,14 +1,16 @@
 import './ui/style.css';
 import { Engine } from './core/engine';
-import { ProvingGround } from './world/proving';
+import { CityWorld } from './world/world';
 
 const app = document.getElementById('app')!;
 const ui = document.getElementById('ui')!;
 
 const engine = new Engine(app, ui);
-engine.setWorld(new ProvingGround());
+const world = new CityWorld();
+engine.setWorld(world);
+engine.attachMinimap(world.net);
 engine.buildPlayer();
 engine.start();
-engine.hud.setObjective('Free drive — proving ground', 'W to drive · ? for all controls');
+engine.hud.setObjective('Free roam — Queen St W', 'Drive the city · ? for all controls');
 
 document.getElementById('splash')?.remove();
