@@ -23,8 +23,9 @@ import { AudioManager } from '../audio/audio';
 import { Hud } from '../ui/hud';
 import { Minimap, type MinimapMarker } from '../ui/minimap';
 import type { RoadNetwork } from '../world/network';
+import type { TrafficManager } from '../traffic/manager';
 import type { CollisionWorld } from '../physics/collision';
-import { carOBB } from '../physics/collision';
+import { carOBB, obbVsCircle, obbVsObb } from '../physics/collision';
 
 export interface WorldBase {
   readonly group: THREE.Object3D;
@@ -67,6 +68,7 @@ export class Engine {
   headlightL!: THREE.SpotLight;
   headlightR!: THREE.SpotLight;
   minimap: Minimap | null = null;
+  traffic: TrafficManager | null = null;
   /** Overlays drawn on the minimap (examiner route, lesson markers). */
   routeOverlay: { x: number; z: number }[] | null = null;
   mapMarkers: MinimapMarker[] = [];
@@ -184,6 +186,12 @@ export class Engine {
 
   attachMinimap(net: RoadNetwork): void {
     this.minimap = new Minimap(net, this.hud.minimapCanvas);
+  }
+
+  attachTraffic(tm: TrafficManager): void {
+    if (this.traffic) this.scene.remove(this.traffic.group);
+    this.traffic = tm;
+    this.scene.add(tm.group);
   }
 
   buildPlayer(color = 0x2f6fce): void {
@@ -346,6 +354,21 @@ export class Engine {
     const v = this.vehicle;
     const obb = carOBB(v.x, v.z, v.heading, v.p.length, v.p.width, 'player');
     const contacts = this.world.collision.collide(obb);
+    // dynamic obstacles: traffic, transit, cyclists, pedestrians
+    if (this.traffic) {
+      const dyn = this.traffic.dynamicObstacles(v.x, v.z, 32);
+      for (const o of dyn.obbs) {
+        const c = obbVsObb(obb, o);
+        if (c) {
+          contacts.push(c);
+          this.traffic.notifyHit(o.ref);
+        }
+      }
+      for (const ci of dyn.circles) {
+        const c = obbVsCircle(obb, ci);
+        if (c) contacts.push(c);
+      }
+    }
     for (const c of contacts) {
       if (c.tag === 'cone' || c.tag === 'knockable') {
         this.world.onPropHit?.(c.ref);
@@ -398,6 +421,13 @@ export class Engine {
       this.updateSignals(dt);
       this.updateSafePose(dt);
       this.world.update(dt, this.simTime, this.vehicle.pos);
+      this.traffic?.update(
+        dt,
+        this.simTime,
+        { x: this.vehicle.x, z: this.vehicle.z, heading: this.vehicle.heading, speed: this.vehicle.vx },
+        this.weatherMu,
+        this.sky.nightFactor,
+      );
 
       // environment
       const v = this.vehicle;
@@ -478,7 +508,17 @@ export class Engine {
       idleCity: 0.5,
     });
     const fwd = headingForward(v.heading);
-    this.audio.setSpatial({ x: v.x, y: v.y + 1.2, z: v.z, fx: fwd.x, fz: fwd.z });
+    // emergency siren + streetcar bell
+    const em = this.traffic?.emergency;
+    this.audio.setSiren(!!em?.active);
+    this.audio.setSpatial(
+      { x: v.x, y: v.y + 1.2, z: v.z, fx: fwd.x, fz: fwd.z },
+      em?.active ? { x: em.user.x, y: 1.5, z: em.user.z } : undefined,
+    );
+    if (this.traffic?.streetcar.bellPending) {
+      this.traffic.streetcar.bellPending = false;
+      this.audio.bell();
+    }
 
     // HUD
     const loc = this.world.locationAt(v.x, v.z);
