@@ -104,6 +104,7 @@ export class Examiner {
     app.engine.hud.clearToasts();
     this.startedAt = app.engine.simTime;
     this.odoStart = app.engine.vehicle.odometer;
+    app.recorder.begin('exam');
     app.engine.hud.centerMsg('Mock G Road Test', 'The examiner grades silently. Listen for instructions.', false);
     app.modeTick = (dt) => this.tick(dt);
     app.onQuitDrive = () => this.abort();

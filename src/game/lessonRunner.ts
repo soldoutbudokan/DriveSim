@@ -74,6 +74,7 @@ export class LessonRunner {
 
     this.startedAt = app.engine.simTime;
     this.faultsAtTaskStart = 0;
+    app.recorder.begin('lesson');
     app.engine.hud.setVisible(true);
     app.engine.hud.clearToasts();
     app.engine.hud.centerMsg(lesson.title, lesson.objective);
@@ -301,6 +302,7 @@ export class LessonRunner {
   private finish(): void {
     const lesson = this.lesson!;
     const app = this.app;
+    void app.recorder.end(null, null);
     const faults = app.coach.faults;
     const sum = app.coach.summary();
     const duration = app.engine.simTime - this.startedAt;

@@ -25,6 +25,8 @@ export class TrafficCar {
   next: LaneLink | null = null;
   signal: 'off' | 'left' | 'right' = 'off';
   braking = false;
+  /** Visual body kind (recorded into replays). */
+  kindName = 'sedan';
   /** Fixed route (transit / cyclists): looped lane sequence. */
   routePlan: Lane[] | null = null;
   planIdx = 0;

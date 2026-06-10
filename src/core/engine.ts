@@ -91,6 +91,8 @@ export class Engine {
 
   simTime = 0;
   paused = false;
+  /** When false (replay), physics/traffic/world are suspended; render continues. */
+  simulate = true;
   signal: SignalSide = 'off';
   headlights = false;
   hazards = false;
@@ -413,25 +415,27 @@ export class Engine {
 
     if (!this.paused) {
       this.simTime += dt;
-      const inputEnabled = this.hooks.inputEnabled?.() ?? true;
-      const effInput = inputEnabled
-        ? this.input.state
-        : { throttle: 0, brake: 0.4, steer: 0, handbrake: false, precise: false, horn: false };
+      if (this.simulate) {
+        const inputEnabled = this.hooks.inputEnabled?.() ?? true;
+        const effInput = inputEnabled
+          ? this.input.state
+          : { throttle: 0, brake: 0.4, steer: 0, handbrake: false, precise: false, horn: false };
 
-      this.vehicle.update(dt, effInput, this.groundQuery);
-      this.updateCollisions(dt);
-      this.updateSignals(dt);
-      this.updateSafePose(dt);
-      this.world.update(dt, this.simTime, this.vehicle.pos);
-      this.traffic?.update(
-        dt,
-        this.simTime,
-        { x: this.vehicle.x, z: this.vehicle.z, heading: this.vehicle.heading, speed: this.vehicle.vx },
-        this.weatherMu,
-        this.sky.nightFactor,
-      );
+        this.vehicle.update(dt, effInput, this.groundQuery);
+        this.updateCollisions(dt);
+        this.updateSignals(dt);
+        this.updateSafePose(dt);
+        this.world.update(dt, this.simTime, this.vehicle.pos);
+        this.traffic?.update(
+          dt,
+          this.simTime,
+          { x: this.vehicle.x, z: this.vehicle.z, heading: this.vehicle.heading, speed: this.vehicle.vx },
+          this.weatherMu,
+          this.sky.nightFactor,
+        );
+      }
 
-      // environment
+      // environment (runs in replay too — sky/weather are part of the scene)
       const v = this.vehicle;
       this.sky.update(dt, this.scene, this.sun, this.moon, this.hemi, v.x, v.z);
       const wv = v.worldVel;
@@ -440,7 +444,7 @@ export class Engine {
       this.world.setNight?.(this.sky.nightFactor);
       this.weatherMu = this.weather.gripMul;
       this.weatherDrag = this.weather.kind === 'snow' ? 60 : 0;
-      if (this.autoHeadlights && this.sky.nightFactor > 0.55 && this.prevNight <= 0.55) this.headlights = true;
+      if (this.simulate && this.autoHeadlights && this.sky.nightFactor > 0.55 && this.prevNight <= 0.55) this.headlights = true;
       this.prevNight = this.sky.nightFactor;
 
       this.hooks.tick?.(dt);

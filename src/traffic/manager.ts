@@ -135,6 +135,7 @@ export class TrafficManager implements TrafficContext {
       const { kind, color } = this.pickAiKind();
       const built = buildCar(kind, color);
       const car = new TrafficCar(lane, s, built.dims.length / 2, built.dims.width / 2);
+      car.kindName = kind;
       car.speed = (lane.speed / 3.6) * 0.7;
       const vis = new CarVisual(built);
       built.root.traverse((o) => (o.castShadow = o.castShadow || o.type === 'Mesh'));
