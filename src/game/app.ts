@@ -10,6 +10,9 @@ import { TrafficManager } from '../traffic/manager';
 import { Coach } from '../coaching/coach';
 import { Menus } from '../ui/menus';
 import { loadSettings, saveSettings, type Settings } from './settings';
+import { LessonRunner } from './lessonRunner';
+import { LESSONS, MOCK_TEST_CARD } from '../scenarios/lessons';
+import { loadProgress } from './progress';
 
 export type Mode = 'menu' | 'free' | 'lesson' | 'exam' | 'replay';
 
@@ -21,6 +24,7 @@ export class GameApp {
   readonly menus: Menus;
   settings: Settings;
   mode: Mode = 'menu';
+  readonly lessonRunner: LessonRunner;
 
   /** Per-mode tick extensions (lesson runner, examiner, replay). */
   modeTick: ((dt: number) => void) | null = null;
@@ -37,6 +41,7 @@ export class GameApp {
     this.coach = new Coach(this.engine, this.world, this.traffic);
     this.menus = new Menus(uiEl);
     this.settings = loadSettings();
+    this.lessonRunner = new LessonRunner(this);
 
     this.engine.buildPlayer(this.settings.carColor);
     this.applySettings();
@@ -91,18 +96,53 @@ export class GameApp {
     );
   }
 
-  /** Hooked by later systems (lessons/examiner/replay/persistence). */
-  openLessons: () => void = () => this.engine.hud.toast('Lessons load in a moment — try Free Roam.', 'info');
+  /** Hooked by later systems (examiner/replay/persistence). */
+  openLessons: () => void = () => {
+    const progress = loadProgress();
+    const cards = LESSONS.map((l, i) => ({
+      id: l.id,
+      title: l.title,
+      desc: l.desc,
+      badge: progress.lessons[l.id]?.completed ? '✓ done' : `lesson ${i + 1}`,
+      done: !!progress.lessons[l.id]?.completed,
+    }));
+    cards.push({
+      id: MOCK_TEST_CARD.id,
+      title: MOCK_TEST_CARD.title,
+      desc: MOCK_TEST_CARD.desc,
+      badge: 'examiner',
+      done: progress.exams.some((e) => e.passed),
+    });
+    this.menus.showCards(
+      'Lessons',
+      'Sequenced like real instruction — finish each to unlock confidence, then take the mock test.',
+      cards,
+      (id) => {
+        if (id === MOCK_TEST_CARD.id) {
+          this.openExam();
+          return;
+        }
+        const lesson = LESSONS.find((l) => l.id === id);
+        if (lesson) this.lessonRunner.start(lesson);
+      },
+      () => this.showMainMenu(),
+    );
+  };
   openExam: () => void = () => this.engine.hud.toast('Examiner mode is being prepared.', 'info');
   openReplays: () => void = () => this.engine.hud.toast('No replays yet.', 'info');
   openDashboard: () => void = () => this.engine.hud.toast('Drive first — telemetry follows.', 'info');
   openProfiles: () => void = () => {};
-  menuStats: () => { profile: string; bestExam: string; lessonsDone: number; lessonsTotal: number } = () => ({
-    profile: 'Driver',
-    bestExam: '',
-    lessonsDone: 0,
-    lessonsTotal: 6,
-  });
+  menuStats: () => { profile: string; bestExam: string; lessonsDone: number; lessonsTotal: number } = () => {
+    const progress = loadProgress();
+    const done = LESSONS.filter((l) => progress.lessons[l.id]?.completed).length;
+    const best = progress.exams.length ? Math.max(...progress.exams.map((e) => e.score)) : null;
+    return {
+      profile: 'Driver',
+      bestExam: best !== null ? `${best}%` : '',
+      lessonsDone: done,
+      lessonsTotal: LESSONS.length + 1,
+    };
+  };
 
   goFreeRoam(): void {
     this.menus.hide();
