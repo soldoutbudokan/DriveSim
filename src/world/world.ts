@@ -157,6 +157,10 @@ export class CityWorld implements WorldBase {
     }
   }
 
+  setNight(f: number): void {
+    this.props.setNight(f);
+  }
+
   update(dt: number, simTime: number): void {
     this.signals.update(simTime);
     this.signals.setPxoActive(this.pxo.active);

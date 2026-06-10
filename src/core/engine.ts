@@ -5,9 +5,16 @@
  */
 
 import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { Emitter } from './events';
 import type { GameEvents, CameraMode } from './types';
 import { clamp, clamp01, headingForward, type V2 } from './math';
+import { AutoQuality, TIERS, type Tier } from './quality';
+import { SkySystem } from '../weather/sky';
+import { WeatherSystem } from '../weather/weather';
 import { Input } from '../controls/input';
 import { Vehicle, type GroundSample, type VehiclePose } from '../vehicle/vehicle';
 import { buildCar, CarVisual } from '../vehicle/carFactory';
@@ -30,6 +37,8 @@ export interface WorldBase {
   update(dt: number, simTime: number, playerPos: V2): void;
   /** Called when the player hits a knockable prop (cones). */
   onPropHit?(ref: unknown): void;
+  /** Night factor 0..1 for emissives (streetlights, windows). */
+  setNight?(f: number): void;
 }
 
 export type SignalSide = 'off' | 'left' | 'right';
@@ -65,6 +74,16 @@ export class Engine {
   readonly sun: THREE.DirectionalLight;
   readonly hemi: THREE.HemisphereLight;
   readonly moon: THREE.DirectionalLight;
+  readonly sky = new SkySystem();
+  readonly weather: WeatherSystem;
+  readonly autoQuality = new AutoQuality();
+  tier: Tier = 'high';
+  /** Auto-headlights at night (toggleable in settings). */
+  autoHeadlights = true;
+  private prevNight = 0;
+  private composer: EffectComposer | null = null;
+  private bloomPass: UnrealBloomPass | null = null;
+  private renderPass!: RenderPass;
 
   simTime = 0;
   paused = false;
@@ -124,12 +143,37 @@ export class Engine {
     this.sun.shadow.camera.bottom = -sc;
     this.sun.shadow.bias = -0.0007;
     this.moon = new THREE.DirectionalLight(0x8899ff, 0);
-    this.scene.add(this.hemi, this.sun, this.sun.target, this.moon);
+    this.scene.add(this.hemi, this.sun, this.sun.target, this.moon, this.moon.target);
     this.scene.fog = new THREE.Fog(0xbfd2e8, 250, 1500);
     this.scene.background = new THREE.Color(0x9fc3ef);
 
+    this.weather = new WeatherSystem(this.scene);
+    this.setQuality('high');
+
     window.addEventListener('resize', () => this.onResize());
     this.input.onFirstGesture(() => this.audio.init());
+  }
+
+  setQuality(tier: Tier): void {
+    this.tier = tier;
+    const cfg = TIERS[tier];
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, cfg.pixelRatioCap));
+    this.renderer.shadowMap.enabled = cfg.shadowMap > 0;
+    if (cfg.shadowMap > 0) {
+      this.sun.shadow.mapSize.set(cfg.shadowMap, cfg.shadowMap);
+      this.sun.shadow.map?.dispose();
+      this.sun.shadow.map = null;
+    }
+    this.weather.particleScale = cfg.particleScale;
+    if (cfg.bloom && !this.composer) {
+      this.composer = new EffectComposer(this.renderer);
+      this.renderPass = new RenderPass(this.scene, this.camera.camera);
+      this.bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.28, 0.5, 0.82);
+      this.composer.addPass(this.renderPass);
+      this.composer.addPass(this.bloomPass);
+      this.composer.addPass(new OutputPass());
+    }
+    if (this.bloomPass) this.bloomPass.enabled = cfg.bloom;
   }
 
   setWorld(world: WorldBase): void {
@@ -354,7 +398,26 @@ export class Engine {
       this.updateSignals(dt);
       this.updateSafePose(dt);
       this.world.update(dt, this.simTime, this.vehicle.pos);
+
+      // environment
+      const v = this.vehicle;
+      this.sky.update(dt, this.scene, this.sun, this.moon, this.hemi, v.x, v.z);
+      const wv = v.worldVel;
+      this.weather.update(dt, this.scene, v.x, v.y, v.z, wv.x, wv.z);
+      this.sun.intensity *= 1 - this.weather.skyDim;
+      this.world.setNight?.(this.sky.nightFactor);
+      this.weatherMu = this.weather.gripMul;
+      this.weatherDrag = this.weather.kind === 'snow' ? 60 : 0;
+      if (this.autoHeadlights && this.sky.nightFactor > 0.55 && this.prevNight <= 0.55) this.headlights = true;
+      this.prevNight = this.sky.nightFactor;
+
       this.hooks.tick?.(dt);
+    }
+
+    const newTier = this.autoQuality.evaluate(dt, this.fpsSmooth);
+    if (newTier) {
+      this.setQuality(newTier);
+      this.hud.toast(`Graphics auto-adjusted to ${newTier}.`, 'info');
     }
 
     this.render(dt);
@@ -410,7 +473,7 @@ export class Engine {
       speed: v.speed,
       skid: clamp01(skid),
       shifting: v.powertrain.shifting,
-      rainLevel: 0,
+      rainLevel: this.weather.rainLevel * (this.wipers ? 0.8 : 1),
       blinkPhaseOn: this.signal !== 'off' || this.hazards ? this.blinkPhase : undefined,
       idleCity: 0.5,
     });
@@ -439,9 +502,14 @@ export class Engine {
 
     this.minimap?.update({ x: v.x, z: v.z, heading: v.heading }, this.routeOverlay ?? undefined, this.mapMarkers);
 
-    // main render
+    // main render (bloom composer at high tiers)
     this.renderer.setScissorTest(false);
-    this.renderer.render(this.scene, this.camera.camera);
+    if (this.composer && this.bloomPass?.enabled) {
+      this.renderPass.camera = this.camera.camera;
+      this.composer.render();
+    } else {
+      this.renderer.render(this.scene, this.camera.camera);
+    }
 
     // rear-view mirror inset (scissor viewport)
     const showMirror = this.mirrorViewT > 0 || (this.camera.mode === 'cockpit' && this.camera.glanceActive === 'mirror');
@@ -469,6 +537,7 @@ export class Engine {
 
   private onResize(): void {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.composer?.setSize(window.innerWidth, window.innerHeight);
     this.camera.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.camera.updateProjectionMatrix();
   }
