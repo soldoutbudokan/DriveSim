@@ -10,7 +10,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { polylineAt, polylineLength, type V2 } from '../core/math';
 import { BIKE_W, PARK_W, SIDEWALK_W, type EdgeRT, type Lane, RoadNetwork } from './network';
-import { asphaltTexture } from './textures';
+import { asphaltTexture, concreteTexture } from './textures';
 
 type HeightFn = (s: number) => number;
 
@@ -142,7 +142,11 @@ function solidLine(base: V2[], offset: number, width: number, y: HeightFn, yLift
   return ribbon(pts, width / 2, -width / 2, (s) => y(s + margin), yLift);
 }
 
-/** Quad centred at p, long axis along dir, length `along`, width `across`. */
+/**
+ * Quad centred at p, long axis along dir, length `along`, width `across`.
+ * NOTE: every marking geometry must carry a uv attribute — mergeGeometries
+ * refuses to merge mixed attribute sets and silently drops the whole batch.
+ */
 function bar(p: V2, dir: V2, along: number, across: number, yv: number): THREE.BufferGeometry {
   const lx = dir.z;
   const lz = -dir.x;
@@ -158,6 +162,7 @@ function bar(p: V2, dir: V2, along: number, across: number, yv: number): THREE.B
     p.x + hx + wx, yv, p.z + hz + wz,
   ]);
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), 2));
   g.setIndex([0, 1, 2, 1, 3, 2]);
   g.computeVertexNormals();
   return g;
@@ -174,6 +179,7 @@ function tooth(p: V2, dir: V2, size: number, yv: number): THREE.BufferGeometry {
     p.x - dir.x * size, yv, p.z - dir.z * size,
   ]);
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([0, 0, 1, 0, 0.5, 1]), 2));
   g.setIndex([0, 1, 2]);
   g.computeVertexNormals();
   return g;
@@ -190,6 +196,7 @@ function diamond(p: V2, dir: V2, len: number, wid: number, yv: number): THREE.Bu
     p.x - (lx * wid) / 2, yv, p.z - (lz * wid) / 2,
   ]);
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([0.5, 1, 1, 0.5, 0.5, 0, 0, 0.5]), 2));
   g.setIndex([0, 1, 3, 1, 2, 3]);
   g.computeVertexNormals();
   return g;
@@ -207,6 +214,7 @@ export function buildRoadGeometry(net: RoadNetwork): THREE.Group {
   const white: THREE.BufferGeometry[] = [];
   const yellow: THREE.BufferGeometry[] = [];
   const walks: THREE.BufferGeometry[] = [];
+  const curbs: THREE.BufferGeometry[] = [];
   const rails: THREE.BufferGeometry[] = [];
   const bikePaint: THREE.BufferGeometry[] = [];
   const skirts: THREE.BufferGeometry[] = [];
@@ -308,10 +316,12 @@ export function buildRoadGeometry(net: RoadNetwork): THREE.Group {
       }
     }
 
-    // sidewalks (city/residential streets)
+    // sidewalks + curb faces (city/residential streets)
     if (d.kind === 'city' || d.kind === 'residential' || d.kind === 'lot') {
       walks.push(ribbon(base, edge.halfL + SIDEWALK_W, edge.halfL + 0.12, y, Y_WALK));
       walks.push(ribbon(base, -edge.halfR - 0.12, -edge.halfR - SIDEWALK_W, y, Y_WALK));
+      curbs.push(ribbon2(base, edge.halfL + 0.16, edge.halfL - 0.04, (s) => y(s) + Y_WALK, (s) => y(s) + Y_ROAD, 0));
+      curbs.push(ribbon2(base, -edge.halfR + 0.04, -edge.halfR - 0.16, (s) => y(s) + Y_ROAD, (s) => y(s) + Y_WALK, 0));
     }
   }
 
@@ -366,9 +376,10 @@ export function buildRoadGeometry(net: RoadNetwork): THREE.Group {
 
   // --- materials + meshes ---------------------------------------------------
   const asphaltMat = new THREE.MeshStandardMaterial({ map: asphaltTexture(), roughness: 0.94, metalness: 0 });
-  const whiteMat = new THREE.MeshStandardMaterial({ color: 0xdfe5ea, roughness: 0.7 });
-  const yellowMat = new THREE.MeshStandardMaterial({ color: 0xe2b13c, roughness: 0.7 });
-  const walkMat = new THREE.MeshStandardMaterial({ color: 0x8f969e, roughness: 0.95 });
+  const whiteMat = new THREE.MeshStandardMaterial({ color: 0xe8edf2, roughness: 0.62 });
+  const yellowMat = new THREE.MeshStandardMaterial({ color: 0xe2b13c, roughness: 0.62 });
+  const walkMat = new THREE.MeshStandardMaterial({ map: concreteTexture(), roughness: 0.95 });
+  const curbMat = new THREE.MeshStandardMaterial({ color: 0xa6adb5, roughness: 0.9 });
   const railMat = new THREE.MeshStandardMaterial({ color: 0x6a7077, roughness: 0.35, metalness: 0.9 });
   const bikeMat = new THREE.MeshStandardMaterial({ color: 0x2e7d4f, roughness: 0.85 });
 
@@ -378,7 +389,11 @@ export function buildRoadGeometry(net: RoadNetwork): THREE.Group {
       geos.filter((g) => g.getAttribute('position') && g.getAttribute('position').count > 0).map((g) => (g.index ? g.toNonIndexed() : g)),
       false,
     );
-    if (!merged) return;
+    if (!merged) {
+      // mergeGeometries returns null on mixed attribute sets — never swallow that
+      console.error(`buildRoadGeometry: failed to merge "${name}" (${geos.length} geometries) — check attribute consistency`);
+      return;
+    }
     const mesh = new THREE.Mesh(merged, mat);
     mesh.receiveShadow = receiveShadow;
     mesh.name = name;
@@ -391,6 +406,7 @@ export function buildRoadGeometry(net: RoadNetwork): THREE.Group {
   addMerged(white, whiteMat, true, 'markWhite');
   addMerged(yellow, yellowMat, true, 'markYellow');
   addMerged(walks, walkMat, true, 'sidewalks');
+  addMerged(curbs, curbMat, true, 'curbs');
   addMerged(rails, railMat, true, 'rails');
   addMerged(bikePaint, bikeMat, true, 'bikePaint');
   addMerged(skirts, grassMat, true, 'embankments');

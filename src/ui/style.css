@@ -128,7 +128,41 @@ body, button, input, select {
 #centerMsg.show { opacity: 1; }
 #centerMsg .sub { display: block; font-size: 15px; font-weight: 500; color: var(--dim); letter-spacing: 0.5px; margin-top: 8px; }
 
-/* ---------- overlays (help / menus) ---------- */
+/* ---------- controls dock (toggled with ?) ---------- */
+
+#helpDock {
+  position: absolute; top: 14px; right: 18px; bottom: 18px; width: 304px;
+  display: none; flex-direction: column; padding: 0; z-index: 30; pointer-events: auto;
+}
+#helpDock.open { display: flex; }
+#helpDock .hd-head {
+  display: flex; align-items: center; gap: 8px; padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--line);
+}
+#helpDock .hd-head b { font-size: 15px; }
+#helpDock .hd-hint { font-size: 11px; color: var(--dim); margin-right: auto; }
+#helpDock .hd-x {
+  background: none; border: none; color: var(--dim); font-size: 14px; cursor: pointer;
+  padding: 2px 7px; border-radius: 6px; line-height: 1.4;
+}
+#helpDock .hd-x:hover { background: rgba(255,255,255,0.08); color: var(--text); }
+#helpDock .hd-body { overflow-y: auto; padding: 4px 14px 14px; }
+#helpDock .hd-sec {
+  font-size: 10.5px; font-weight: 800; letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--accent); margin: 14px 0 6px;
+}
+#helpDock .hd-keys div {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  font-size: 12.5px; padding: 3.5px 0; border-bottom: 1px dashed rgba(255,255,255,0.05);
+}
+#helpDock .hd-keys span { color: var(--dim); text-align: right; }
+#helpDock .hd-note { font-size: 11.5px; color: var(--dim); line-height: 1.55; margin: 0; }
+
+/* slide right-edge HUD elements out from under the open dock */
+#ui.help-open #toasts { right: 336px; }
+#ui.help-open #minimapWrap { right: 336px; }
+
+/* ---------- overlays (menus) ---------- */
 
 .overlay {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;

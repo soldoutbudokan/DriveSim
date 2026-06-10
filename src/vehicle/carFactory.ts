@@ -61,10 +61,146 @@ export function bodyMat(color: number, opts: { rough?: number; metal?: number; e
   return m;
 }
 
-const GLASS = new THREE.MeshStandardMaterial({ color: 0x16202c, roughness: 0.12, metalness: 0.85 });
+const GLASS = new THREE.MeshStandardMaterial({ color: 0x141e2a, roughness: 0.06, metalness: 0.9, envMapIntensity: 1.3 });
 const TIRE = new THREE.MeshStandardMaterial({ color: 0x14161a, roughness: 0.92, metalness: 0 });
-const HUB = new THREE.MeshStandardMaterial({ color: 0x9aa3ad, roughness: 0.35, metalness: 0.8 });
+const HUB = new THREE.MeshStandardMaterial({ color: 0x9aa3ad, roughness: 0.3, metalness: 0.85 });
 const TRIM = new THREE.MeshStandardMaterial({ color: 0x1c1f24, roughness: 0.7, metalness: 0.2 });
+
+/* ------------------------------------------------------------------ */
+/* Rounded body shells: a side-profile silhouette extruded across the  */
+/* car's width (with bevel) replaces the old stacked boxes. The body   */
+/* stops at the belt line; a narrower glass greenhouse + painted roof  */
+/* slab sit on top. Geometries are cached per kind.                    */
+/* ------------------------------------------------------------------ */
+
+/** [xFrac of L, yFrac of H] silhouette points, front (+x) first, clockwise. */
+interface ProfileSpec {
+  body: Array<[number, number]>;
+  glass: Array<[number, number]>;
+  /** Painted roof slab span as xFrac [front, rear] and its yFrac. */
+  roof: [number, number, number];
+}
+
+const SEDAN_PROFILE: ProfileSpec = {
+  body: [
+    [0.5, 0.3], [0.5, 0.44], [0.44, 0.52], [0.12, 0.585], [-0.4, 0.615],
+    [-0.48, 0.6], [-0.5, 0.52], [-0.5, 0.3], [-0.44, 0.18], [0.44, 0.18],
+  ],
+  glass: [
+    [0.115, 0.575], [0.04, 0.95], [-0.295, 0.965], [-0.405, 0.605],
+  ],
+  roof: [0.04, -0.295, 0.955],
+};
+
+const HATCH_PROFILE: ProfileSpec = {
+  body: [
+    [0.5, 0.32], [0.5, 0.46], [0.43, 0.54], [0.1, 0.6], [-0.43, 0.64],
+    [-0.5, 0.58], [-0.5, 0.32], [-0.44, 0.19], [0.44, 0.19],
+  ],
+  glass: [
+    [0.095, 0.59], [0.02, 0.95], [-0.31, 0.965], [-0.435, 0.63],
+  ],
+  roof: [0.02, -0.31, 0.955],
+};
+
+const SUV_PROFILE: ProfileSpec = {
+  body: [
+    [0.5, 0.34], [0.5, 0.5], [0.42, 0.56], [0.12, 0.6], [-0.44, 0.63],
+    [-0.5, 0.58], [-0.5, 0.34], [-0.45, 0.22], [0.45, 0.22],
+  ],
+  glass: [
+    [0.115, 0.59], [0.05, 0.95], [-0.4, 0.96], [-0.445, 0.62],
+  ],
+  roof: [0.05, -0.4, 0.95],
+};
+
+const PROFILE_FOR: Partial<Record<CarKind, ProfileSpec>> = {
+  sedan: SEDAN_PROFILE,
+  taxi: SEDAN_PROFILE,
+  police: SEDAN_PROFILE,
+  hatch: HATCH_PROFILE,
+  suv: SUV_PROFILE,
+};
+
+function extrudeProfile(pts: Array<[number, number]>, L: number, H: number, width: number, bevel: number): THREE.BufferGeometry {
+  const shape = new THREE.Shape();
+  pts.forEach(([fx, fy], i) => {
+    const x = fx * L;
+    const y = fy * H;
+    i === 0 ? shape.moveTo(x, y) : shape.lineTo(x, y);
+  });
+  shape.closePath();
+  const depth = Math.max(0.1, width - 2 * bevel);
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    steps: 1,
+    depth,
+    bevelEnabled: true,
+    bevelThickness: bevel,
+    bevelSize: bevel * 0.9,
+    bevelSegments: 3,
+  });
+  geo.rotateY(-Math.PI / 2); // shape +x (longitudinal) → world +z (forward)
+  geo.translate((depth + 2 * bevel) / 2 - bevel, 0, 0); // centre across width
+  return geo;
+}
+
+interface ShellGeos {
+  body: THREE.BufferGeometry;
+  glass: THREE.BufferGeometry;
+  roof: THREE.BufferGeometry;
+  roofY: number;
+}
+
+const shellCache = new Map<CarKind, ShellGeos>();
+
+function passengerShell(kind: CarKind): ShellGeos {
+  const hit = shellCache.get(kind);
+  if (hit) return hit;
+  const { length: L, width: W, height: H } = CAR_DIMS[kind];
+  const spec = PROFILE_FOR[kind]!;
+  const body = extrudeProfile(spec.body, L, H, W, 0.06);
+  const glass = extrudeProfile(spec.glass, L, H, W * 0.86, 0.035);
+  const [rF, rR, rY] = spec.roof;
+  const roofLen = (rF - rR) * L;
+  const roof = new THREE.BoxGeometry(W * 0.8, H * 0.035, roofLen * 0.96);
+  roof.translate(0, rY * H + H * 0.02, ((rF + rR) / 2) * L);
+  const out = { body, glass, roof, roofY: rY * H };
+  shellCache.set(kind, out);
+  return out;
+}
+
+/** Rounded-rectangle cross-section shell for vans/trucks/buses. */
+function bigShell(kind: CarKind, bodyH: number, yBase: number): THREE.BufferGeometry {
+  const key = kind;
+  const cached = shellCache.get(key);
+  if (cached) return cached.body;
+  const { length: L, width: W } = CAR_DIMS[kind];
+  const r = Math.min(0.18, W * 0.09);
+  const shape = new THREE.Shape();
+  const x0 = -W / 2;
+  const y0 = yBase;
+  shape.moveTo(x0 + r, y0);
+  shape.lineTo(x0 + W - r, y0);
+  shape.quadraticCurveTo(x0 + W, y0, x0 + W, y0 + r);
+  shape.lineTo(x0 + W, y0 + bodyH - r);
+  shape.quadraticCurveTo(x0 + W, y0 + bodyH, x0 + W - r, y0 + bodyH);
+  shape.lineTo(x0 + r, y0 + bodyH);
+  shape.quadraticCurveTo(x0, y0 + bodyH, x0, y0 + bodyH - r);
+  shape.lineTo(x0, y0 + r);
+  shape.quadraticCurveTo(x0, y0, x0 + r, y0);
+  const depth = L - 0.16;
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    steps: 1,
+    depth,
+    bevelEnabled: true,
+    bevelThickness: 0.08,
+    bevelSize: 0.07,
+    bevelSegments: 2,
+  });
+  geo.translate(0, 0, -depth / 2);
+  shellCache.set(key, { body: geo, glass: geo, roof: geo, roofY: 0 });
+  return geo;
+}
 
 export interface CarLightMats {
   head: THREE.MeshStandardMaterial;
@@ -105,10 +241,10 @@ function box(w: number, h: number, d: number, mat: THREE.Material, x = 0, y = 0,
 
 function wheel(r: number, w: number): THREE.Object3D {
   const grp = new THREE.Group();
-  const tire = new THREE.Mesh(new THREE.CylinderGeometry(r, r, w, 14), TIRE);
+  const tire = new THREE.Mesh(new THREE.CylinderGeometry(r, r, w, 18), TIRE);
   tire.rotation.z = Math.PI / 2;
   tire.castShadow = true;
-  const hub = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.55, r * 0.55, w + 0.02, 10), HUB);
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.55, r * 0.55, w + 0.02, 12), HUB);
   hub.rotation.z = Math.PI / 2;
   grp.add(tire, hub);
   return grp;
@@ -125,7 +261,7 @@ export function buildCar(kind: CarKind, color: number): BuiltCar {
   const chassis = new THREE.Group();
   root.add(chassis);
 
-  const paint = bodyMat(color);
+  const paint = bodyMat(color, { rough: 0.3, metal: 0.72 });
   const lights: CarLightMats = {
     head: mkLightMat(0xfff2cc),
     tail: mkLightMat(0xff2a1a),
@@ -137,35 +273,50 @@ export function buildCar(kind: CarKind, color: number): BuiltCar {
   const isBig = kind === 'truck' || kind === 'schoolbus' || kind === 'streetcar' || kind === 'firetruck' || kind === 'ambulance';
 
   if (!isBig) {
-    // --- passenger car: lower body + cabin -----------------------------
-    const bodyH = H * 0.52;
-    const body = box(W, bodyH, L, paint, 0, R * 0.7 + bodyH / 2, 0);
-    const cabinH = H - bodyH - 0.04;
-    const cabinL = kind === 'hatch' ? L * 0.52 : L * 0.45;
-    const cabinZ = kind === 'hatch' ? -L * 0.1 : -L * 0.06;
-    const cabin = box(W * 0.88, cabinH, cabinL, GLASS, 0, R * 0.7 + bodyH + cabinH / 2, cabinZ);
-    const roof = box(W * 0.84, 0.05, cabinL * 0.82, paint, 0, R * 0.7 + bodyH + cabinH, cabinZ);
-    const bumperF = box(W * 0.98, 0.18, 0.16, TRIM, 0, R * 0.62, L / 2 - 0.06);
-    const bumperR = box(W * 0.98, 0.18, 0.16, TRIM, 0, R * 0.62, -L / 2 + 0.06);
-    chassis.add(body, cabin, roof, bumperF, bumperR);
+    // --- passenger car: rounded extruded shell + glass greenhouse ------
+    const shell = passengerShell(kind);
+    const body = new THREE.Mesh(shell.body, paint);
+    const glass = new THREE.Mesh(shell.glass, GLASS);
+    const roof = new THREE.Mesh(shell.roof, paint);
+    body.castShadow = true;
+    glass.castShadow = true;
+    chassis.add(body, glass, roof);
+    // wheel-well shadows: dark discs tucked behind each wheel
+    const archGeo = new THREE.CylinderGeometry(R + 0.06, R + 0.06, 0.3, 16);
+    archGeo.rotateZ(Math.PI / 2);
+    for (const [ax, az] of [
+      [-(W / 2 - 0.13), L * 0.32],
+      [W / 2 - 0.13, L * 0.32],
+      [-(W / 2 - 0.13), -L * 0.32],
+      [W / 2 - 0.13, -L * 0.32],
+    ]) {
+      const arch = new THREE.Mesh(archGeo, TRIM);
+      arch.position.set(ax, R, az);
+      chassis.add(arch);
+    }
+    const bumperF = box(W * 0.96, 0.16, 0.18, TRIM, 0, H * 0.26, L / 2 - 0.05);
+    const bumperR = box(W * 0.96, 0.16, 0.18, TRIM, 0, H * 0.26, -L / 2 + 0.05);
+    chassis.add(bumperF, bumperR);
 
+    const roofY = shell.roofY + H * 0.04;
     if (kind === 'taxi') {
-      const sign = box(0.5, 0.16, 0.3, bodyMat(0xfde9a8, { emissive: 0xffe9a0 }), 0, R * 0.7 + bodyH + cabinH + 0.12, cabinZ);
+      const sign = box(0.5, 0.16, 0.3, bodyMat(0xfde9a8, { emissive: 0xffe9a0 }), 0, roofY + 0.1, -L * 0.13);
       chassis.add(sign);
     }
     if (kind === 'police') {
       lights.beaconA = mkLightMat(0xff2222);
       lights.beaconB = mkLightMat(0x2266ff);
-      const barBase = box(W * 0.6, 0.07, 0.32, TRIM, 0, R * 0.7 + bodyH + cabinH + 0.06, cabinZ);
-      const barA = box(W * 0.28, 0.1, 0.3, lights.beaconA, -W * 0.15, R * 0.7 + bodyH + cabinH + 0.14, cabinZ);
-      const barB = box(W * 0.28, 0.1, 0.3, lights.beaconB, W * 0.15, R * 0.7 + bodyH + cabinH + 0.14, cabinZ);
-      const stripe = box(W + 0.02, 0.16, L * 0.96, bodyMat(0x10254a), 0, R * 0.7 + bodyH * 0.55, 0);
+      const barBase = box(W * 0.6, 0.07, 0.32, TRIM, 0, roofY + 0.04, -L * 0.13);
+      const barA = box(W * 0.28, 0.1, 0.3, lights.beaconA, -W * 0.15, roofY + 0.12, -L * 0.13);
+      const barB = box(W * 0.28, 0.1, 0.3, lights.beaconB, W * 0.15, roofY + 0.12, -L * 0.13);
+      const stripe = box(W + 0.04, 0.16, L * 0.82, bodyMat(0x10254a), 0, H * 0.42, 0);
       chassis.add(barBase, barA, barB, stripe);
     }
   } else {
-    // --- vans / trucks / buses: single tall box + cab hint --------------
+    // --- vans / trucks / buses: rounded-edge shell + cab hint -----------
     const bodyH = H - R * 0.6;
-    const body = box(W, bodyH, L, paint, 0, R * 0.6 + bodyH / 2, 0);
+    const body = new THREE.Mesh(bigShell(kind, bodyH, R * 0.6), paint);
+    body.castShadow = true;
     chassis.add(body);
     // windshield band
     const band = box(W * 0.94, H * 0.22, 0.06, GLASS, 0, R * 0.6 + bodyH * 0.72, L / 2 - 0.02);
@@ -212,8 +363,9 @@ export function buildCar(kind: CarKind, color: number): BuiltCar {
   // --- lamps ------------------------------------------------------------
   const lampY = R * 0.85 + (isBig ? 0.25 : 0.18);
   const hw = W / 2 - 0.22;
-  const front = L / 2 - 0.03;
-  const rear = -L / 2 + 0.03;
+  // beveled shells bulge past L/2 — push lamps out so they stay proud of the body
+  const front = L / 2 + (isBig ? -0.03 : 0.03);
+  const rear = -L / 2 - (isBig ? -0.03 : 0.03);
   const headL = box(0.3, 0.12, 0.08, lights.head, -hw, lampY, front);
   const headR = box(0.3, 0.12, 0.08, lights.head, hw, lampY, front);
   const tailL = box(0.3, 0.12, 0.08, lights.tail, -hw, lampY, rear);
@@ -228,8 +380,8 @@ export function buildCar(kind: CarKind, color: number): BuiltCar {
 
   // --- mirrors (passenger cars) ------------------------------------------
   if (!isBig) {
-    const mirL = box(0.06, 0.1, 0.18, TRIM, -W / 2 - 0.08, R * 0.7 + H * 0.52, L * 0.12);
-    const mirR = box(0.06, 0.1, 0.18, TRIM, W / 2 + 0.08, R * 0.7 + H * 0.52, L * 0.12);
+    const mirL = box(0.06, 0.1, 0.18, TRIM, -W / 2 - 0.08, H * 0.6, L * 0.1);
+    const mirR = box(0.06, 0.1, 0.18, TRIM, W / 2 + 0.08, H * 0.6, L * 0.1);
     chassis.add(mirL, mirR);
   }
 

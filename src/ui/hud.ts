@@ -44,6 +44,8 @@ const HELP_ROWS: Array<[string, string]> = [
   ['?', 'This help'],
 ];
 
+const HELP_DOCK_KEY = 'drivesim-helpdock';
+
 const PAD_ROWS: Array<[string, string]> = [
   ['Left stick', 'Steer'],
   ['RT / LT', 'Accelerate / brake'],
@@ -78,6 +80,7 @@ export class Hud {
   private toastsEl: HTMLElement;
   private centerEl: HTMLElement;
   private helpEl: HTMLElement;
+  private uiParent: HTMLElement;
   private locChip: HTMLElement;
   private lastToast = '';
   private lastToastAt = 0;
@@ -136,26 +139,31 @@ export class Hud {
     const names = ['head', 'haz', 'hand', 'abs', 'wiper'];
     iconEls.forEach((el, i) => (this.icons[names[i]] = el as HTMLElement));
 
+    // Controls dock: pinned to the right edge so it can stay up while driving.
+    this.uiParent = parent;
     this.helpEl = document.createElement('div');
-    this.helpEl.className = 'overlay';
-    this.helpEl.style.display = 'none';
+    this.helpEl.id = 'helpDock';
+    this.helpEl.className = 'panel';
     this.helpEl.innerHTML = `
-      <div class="sheet panel clickable">
-        <h1>Drive<em>Sim</em> — Controls & Objectives</h1>
-        <p class="dim">Practice aid for the Ontario Full G road test. Always defer to the official MTO handbook and real supervised driving.</p>
-        <h2>Keyboard</h2>
-        <div class="keys">${HELP_ROWS.map(([k, v]) => `<div><kbd>${k}</kbd><span>${v}</span></div>`).join('')}</div>
-        <h2>Gamepad</h2>
-        <div class="keys">${PAD_ROWS.map(([k, v]) => `<div><kbd>${k}</kbd><span>${v}</span></div>`).join('')}</div>
-        <h2>What the examiner watches</h2>
-        <p class="dim">Signal ~3+ seconds before turns and lane changes · shoulder check before EVERY lane change and merge ·
-        mirror check about every 10 seconds and before braking · full stops behind the line · 2–3 s following gap ·
+      <div class="hd-head">
+        <b>Controls</b>
+        <span class="hd-hint">toggles with <kbd>?</kbd></span>
+        <button class="hd-x" id="helpClose" title="Close (?)">✕</button>
+      </div>
+      <div class="hd-body">
+        <div class="hd-sec">Keyboard</div>
+        <div class="hd-keys">${HELP_ROWS.map(([k, v]) => `<div><kbd>${k}</kbd><span>${v}</span></div>`).join('')}</div>
+        <div class="hd-sec">Gamepad</div>
+        <div class="hd-keys">${PAD_ROWS.map(([k, v]) => `<div><kbd>${k}</kbd><span>${v}</span></div>`).join('')}</div>
+        <div class="hd-sec">The examiner watches</div>
+        <p class="hd-note">Signal ~3 s before turns and lane changes · shoulder check before EVERY lane change and merge ·
+        mirror check every ~10 s and before braking · full stops behind the line · 2–3 s following gap ·
         smooth inputs · yield correctly (pedestrians, streetcars with open doors, school buses, emergency vehicles) ·
         keep to the posted limit without crawling.</p>
-        <div class="row" style="margin-top:18px"><button class="btn primary" id="helpClose">Close (?)</button></div>
       </div>`;
     parent.appendChild(this.helpEl);
     (this.helpEl.querySelector('#helpClose') as HTMLElement).onclick = () => this.showHelp(false);
+    if (localStorage.getItem(HELP_DOCK_KEY) === '1') this.showHelp(true);
   }
 
   setVisible(on: boolean): void {
@@ -224,14 +232,16 @@ export class Hud {
   }
 
   showHelp(on?: boolean): boolean {
-    const visible = this.helpEl.style.display !== 'none';
-    const next = on ?? !visible;
-    this.helpEl.style.display = next ? '' : 'none';
+    const next = on ?? !this.helpVisible;
+    this.helpEl.classList.toggle('open', next);
+    // shift toasts/minimap out from under the dock
+    this.uiParent.classList.toggle('help-open', next);
+    localStorage.setItem(HELP_DOCK_KEY, next ? '1' : '0');
     return next;
   }
 
   get helpVisible(): boolean {
-    return this.helpEl.style.display !== 'none';
+    return this.helpEl.classList.contains('open');
   }
 
   /** Place the rear-view mirror frame over the renderer's scissor viewport. */

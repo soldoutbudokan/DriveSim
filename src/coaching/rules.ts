@@ -296,19 +296,31 @@ class SpeedRule implements Rule {
 class Smoothness implements Rule {
   id = 'smoothness';
   private cool = 0;
+  private accelT = 0;
   update(ctx: DriveContext, sink: RuleSink): void {
     this.cool = Math.max(0, this.cool - ctx.dt);
+    // Harsh acceleration must be SUSTAINED (>0.42 g for 0.55 s) — brief peaks
+    // from gear shifts or grade changes don't count. A full-throttle launch in
+    // the trainer car tops out ≈0.38 g, so it only fires on genuinely
+    // aggressive moves (e.g. flooring it down a hill).
+    if (ctx.gLong > 0.42) this.accelT += ctx.dt;
+    else this.accelT = Math.max(0, this.accelT - ctx.dt * 2);
     if (this.cool > 0) return;
     if (ctx.gLong < -0.46 && ctx.speedMs > 6 && !ctx.collision) {
       sink.fault('hard-brake', 'driving', 'minor', 'Hard braking — brake earlier and more gently', ctx);
       this.cool = 7;
-    } else if (ctx.gLong > 0.34) {
+    } else if (this.accelT > 0.55) {
       sink.fault('hard-accel', 'driving', 'minor', 'Harsh acceleration', ctx);
+      this.accelT = 0;
       this.cool = 7;
     } else if (Math.abs(ctx.gLat) > 0.5 && ctx.speedMs > 8) {
       sink.fault('hard-corner', 'turns', 'minor', 'Cornering too fast — slow before the turn, accelerate out gently', ctx);
       this.cool = 7;
     }
+  }
+  reset(): void {
+    this.accelT = 0;
+    this.cool = 0;
   }
 }
 
@@ -328,25 +340,27 @@ class LaneDiscipline implements Rule {
       sink.fault('off-road', 'driving', 'major', 'Left the roadway / mounted the curb', ctx);
       this.curbCool = 6;
     }
-    if (!ctx.laneObj || ctx.speedMs < 4 || ctx.insideNode || ctx.laneChanged) {
+    // A live indicator means the driver is repositioning on purpose — judged
+    // by the lane-change rules instead, so don't also count it as weaving.
+    if (!ctx.laneObj || ctx.speedMs < 4 || ctx.insideNode || ctx.laneChanged || ctx.indicator !== 'off') {
       this.driftT = 0;
       return;
     }
     const off = Math.abs(ctx.laneOffset);
-    if (off > 1.15) {
+    if (off > 1.3) {
       this.driftT += ctx.dt;
-      if (this.driftT > 1.6) {
+      if (this.driftT > 2.4) {
         sink.fault('straddling', 'driving', 'major', 'Straddling lanes — pick a lane and centre in it', ctx);
         this.driftT = -8;
       }
-    } else if (off > 0.65) {
+    } else if (off > 0.85) {
       this.driftT += ctx.dt;
-      if (this.driftT > 3) {
+      if (this.driftT > 4.5) {
         sink.fault('lane-drift', 'driving', 'minor', 'Drifting in the lane — keep centred', ctx);
         this.driftT = -9;
       }
     } else {
-      this.driftT = Math.max(0, this.driftT - ctx.dt);
+      this.driftT = Math.max(0, this.driftT - ctx.dt * 1.5);
     }
     if (ctx.inBikeLane && ctx.speedMs > 3) {
       this.bikeT += ctx.dt;

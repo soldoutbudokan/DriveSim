@@ -66,8 +66,8 @@ export const TRAINER_CAR: VehicleParams = {
   width: 1.78,
   length: 4.55,
   maxSteer: 0.58,
-  steerSpeedRef: 15,
-  steerRate: 3.0,
+  steerSpeedRef: 9, // stronger speed falloff: ~40% of full lock left at 50 km/h
+  steerRate: 2.4,
   dragCoeff: 0.42, // 0.5 * 1.2 * 0.30Cd * 2.2m² ≈ 0.40
   rollResist: 0.013,
   brakeForceMax: 14800, // ≈ 1.09 g before grip limits
@@ -89,7 +89,7 @@ export const TRAINER_CAR: VehicleParams = {
   finalDrive: 3.61,
   driveline: 'fwd',
   drivetrainEff: 0.91,
-  converterStallMult: 1.9,
+  converterStallMult: 1.5,
   converterLockSpeed: 7,
   creepForce: 750,
   shiftTimeS: 0.34,

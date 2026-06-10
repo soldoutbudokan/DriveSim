@@ -9,6 +9,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { Emitter } from './events';
 import type { GameEvents, CameraMode } from './types';
 import { clamp, clamp01, headingForward, type V2 } from './math';
@@ -152,6 +153,12 @@ export class Engine {
     this.scene.add(this.hemi, this.sun, this.sun.target, this.moon, this.moon.target);
     this.scene.fog = new THREE.Fog(0xbfd2e8, 250, 1500);
     this.scene.background = new THREE.Color(0x9fc3ef);
+
+    // image-based specular: car paint/glass/water pick up real reflections
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmrem.dispose();
+    this.scene.environmentIntensity = 0.55;
 
     this.weather = new WeatherSystem(this.scene);
     this.setQuality('high');
@@ -441,6 +448,7 @@ export class Engine {
       const wv = v.worldVel;
       this.weather.update(dt, this.scene, v.x, v.y, v.z, wv.x, wv.z);
       this.sun.intensity *= 1 - this.weather.skyDim;
+      this.scene.environmentIntensity = 0.12 + 0.43 * (1 - this.sky.nightFactor) * (1 - this.weather.skyDim * 0.6);
       this.world.setNight?.(this.sky.nightFactor);
       this.weatherMu = this.weather.gripMul;
       this.weatherDrag = this.weather.kind === 'snow' ? 60 : 0;

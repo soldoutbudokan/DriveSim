@@ -258,7 +258,11 @@ export class Vehicle {
     fzR = Math.max(fzR, m * G * 0.12);
 
     // --- longitudinal force requests -----------------------------------
-    const driveForce = this.powertrain.update(dt, this.vx, this.accelPedal);
+    let driveForce = this.powertrain.update(dt, this.vx, this.accelPedal);
+    // Comfort governor (driving-school spec): cap launch force so a floored
+    // start tops out around 0.38 g — brisk, but under the examiner's
+    // harsh-acceleration line. Engine force at speed never reaches the cap.
+    if (driveForce > 0) driveForce = Math.min(driveForce, m * 3.9);
     const movingSign = Math.abs(this.vx) > 0.05 ? Math.sign(this.vx) : 0;
 
     let brakeReqF = this.brakePedal * p.brakeForceMax * p.brakeBias;

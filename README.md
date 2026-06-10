@@ -21,7 +21,7 @@ A browser-based, Toronto-flavoured driving simulator built to train for the **On
 
 ## Controls
 
-Press **`?`** in-app any time.
+Press **`?`** in-app any time — it pins a controls panel to the right edge that stays up while you drive (press again to hide; the choice is remembered).
 
 | Keyboard | Action |
 | --- | --- |
@@ -36,7 +36,7 @@ Press **`?`** in-app any time.
 | `M` | **Mirror check** (rear-view inset) |
 | `C` / `V` | Cycle camera / cockpit view |
 | `L` · `U` · `H` · `Tab` | Headlights · wipers · horn · hazards |
-| `R` / `P` / `?` | Respawn · pause · help |
+| `R` / `P` / `?` | Respawn · pause · pin/unpin the controls panel |
 
 | Gamepad | Action |
 | --- | --- |

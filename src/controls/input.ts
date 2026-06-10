@@ -173,10 +173,12 @@ export class Input {
     s.horn = this.keys.has('KeyH');
 
     // --- keyboard analog emulation -----------------------------------
+    // Slow ramps stand in for pedal/wheel feel: holding W rolls into the
+    // throttle over ~0.7 s and steering builds over ~0.6 s (returns faster).
     const tUp = this.anyKey(KEY_THROTTLE);
     const tDown = this.anyKey(KEY_BRAKE);
     const throttleMax = s.precise ? 0.45 : 1;
-    const attack = s.precise ? 1.6 : 2.8;
+    const attack = s.precise ? 1.0 : 1.5;
     s.throttle = clamp01(s.throttle + (tUp ? attack : -6) * dt);
     s.throttle = Math.min(s.throttle, tUp ? throttleMax : s.throttle);
     s.brake = clamp01(s.brake + (tDown ? 3.2 : -8) * dt);
@@ -184,7 +186,7 @@ export class Input {
     const left = this.anyKey(KEY_LEFT);
     const right = this.anyKey(KEY_RIGHT);
     const steerTarget = left === right ? 0 : left ? 1 : -1; // +1 = left
-    const steerAttack = (steerTarget === 0 ? 4.5 : 2.6) * this.settings.steerSensitivity;
+    const steerAttack = (steerTarget === 0 ? 3.6 : 1.7) * this.settings.steerSensitivity;
     this.rawSteer = clamp(this.rawSteer + clamp(steerTarget - this.rawSteer, -1, 1) * steerAttack * dt, -1, 1);
     s.steer = this.rawSteer;
 

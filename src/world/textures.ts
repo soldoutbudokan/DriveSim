@@ -487,21 +487,100 @@ export function buildingTexture(seed: number, baseColor: string, cols = 6, rows 
   return out;
 }
 
-/** Subtle asphalt noise so big road surfaces don't look flat. */
+/** Asphalt with aggregate speckle, patch repairs and faint longitudinal wear. */
 export function asphaltTexture(): THREE.CanvasTexture {
   const [c, g] = canvas(256, 256);
-  g.fillStyle = '#3a3e45';
+  g.fillStyle = '#383c43';
   g.fillRect(0, 0, 256, 256);
   const rng = mulberry32(7);
-  for (let i = 0; i < 2600; i++) {
-    const v = 50 + rng() * 28;
+  // large soft tonal patches (repair scars, oil staining)
+  for (let i = 0; i < 9; i++) {
+    const x = rng() * 256;
+    const y = rng() * 256;
+    const r = 30 + rng() * 60;
+    const grad = g.createRadialGradient(x, y, 0, x, y, r);
+    const dark = rng() < 0.5;
+    grad.addColorStop(0, dark ? 'rgba(28,30,35,0.22)' : 'rgba(98,103,112,0.14)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = grad;
+    g.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  // aggregate speckle
+  for (let i = 0; i < 3400; i++) {
+    const v = 46 + rng() * 36;
     g.fillStyle = `rgb(${v},${v + 2},${v + 6})`;
-    g.fillRect(rng() * 256, rng() * 256, 1.6, 1.6);
+    g.fillRect(rng() * 256, rng() * 256, 1.4 + rng(), 1.4 + rng());
+  }
+  // hairline cracks
+  g.strokeStyle = 'rgba(20,22,26,0.5)';
+  g.lineWidth = 0.8;
+  for (let i = 0; i < 5; i++) {
+    g.beginPath();
+    let x = rng() * 256;
+    let y = rng() * 256;
+    g.moveTo(x, y);
+    for (let k = 0; k < 5; k++) {
+      x += (rng() - 0.5) * 46;
+      y += rng() * 30;
+      g.lineTo(x, y);
+    }
+    g.stroke();
   }
   const t = tex(c);
   t.wrapS = THREE.RepeatWrapping;
   t.wrapT = THREE.RepeatWrapping;
   t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/** Concrete sidewalk: slab joints every ~2 m (texture v repeats every 8 m). */
+export function concreteTexture(): THREE.CanvasTexture {
+  const [c, g] = canvas(128, 256);
+  g.fillStyle = '#92989f';
+  g.fillRect(0, 0, 128, 256);
+  const rng = mulberry32(31);
+  for (let i = 0; i < 1500; i++) {
+    const v = 128 + rng() * 46;
+    g.fillStyle = `rgba(${v},${v + 3},${v + 7},0.5)`;
+    g.fillRect(rng() * 128, rng() * 256, 1.3, 1.3);
+  }
+  // expansion joints: 4 per tile vertically (every 2 m), one centre seam
+  g.fillStyle = 'rgba(52,56,62,0.55)';
+  for (let j = 0; j < 4; j++) g.fillRect(0, j * 64, 128, 2);
+  g.fillStyle = 'rgba(52,56,62,0.28)';
+  g.fillRect(63, 0, 1.6, 256);
+  const t = tex(c);
+  t.wrapS = THREE.RepeatWrapping;
+  t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
+/** Grass with mottling + blade noise (tiles invisibly on big lawns). */
+export function grassTexture(): THREE.CanvasTexture {
+  const [c, g] = canvas(256, 256);
+  g.fillStyle = '#5b7f46';
+  g.fillRect(0, 0, 256, 256);
+  const rng = mulberry32(13);
+  for (let i = 0; i < 14; i++) {
+    const x = rng() * 256;
+    const y = rng() * 256;
+    const r = 26 + rng() * 56;
+    const grad = g.createRadialGradient(x, y, 0, x, y, r);
+    grad.addColorStop(0, rng() < 0.5 ? 'rgba(74,106,54,0.35)' : 'rgba(112,142,76,0.3)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = grad;
+    g.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  for (let i = 0; i < 3000; i++) {
+    const k = rng();
+    const r = 70 + k * 60;
+    const gr = 110 + k * 60;
+    g.fillStyle = `rgba(${r * 0.62},${gr * 0.78},${r * 0.42},0.5)`;
+    g.fillRect(rng() * 256, rng() * 256, 1.2, 2 + rng() * 2);
+  }
+  const t = tex(c);
+  t.wrapS = THREE.RepeatWrapping;
+  t.wrapT = THREE.RepeatWrapping;
   return t;
 }
 

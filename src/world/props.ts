@@ -13,7 +13,7 @@ import type { CollisionWorld, CircleCollider } from '../physics/collision';
 import { buildCar, bodyMat, type BuiltCar } from '../vehicle/carFactory';
 import { LANE_W, RoadNetwork, SIDEWALK_W } from './network';
 import { PARKING_BAYS, LOT_RECT, ZONES, STREETCAR_STOPS } from './map';
-import { buildingTexture, signTexture, streetBladeTexture, type SignKind } from './textures';
+import { buildingTexture, grassTexture, signTexture, streetBladeTexture, type SignKind } from './textures';
 
 export interface Cone {
   mesh: THREE.Object3D;
@@ -31,7 +31,8 @@ export interface PropsResult {
 }
 
 const TRUNK_MAT = new THREE.MeshStandardMaterial({ color: 0x5a4632, roughness: 0.95 });
-const CROWN_MAT = new THREE.MeshStandardMaterial({ color: 0x3f6f35, roughness: 0.95 });
+/** White base — foliage greens come from per-instance colors. */
+const CROWN_MAT = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95 });
 const POLE_MAT = new THREE.MeshStandardMaterial({ color: 0x4a4f55, roughness: 0.55, metalness: 0.6 });
 
 function signPost(
@@ -73,9 +74,11 @@ export function buildProps(net: RoadNetwork, collision: CollisionWorld, seed = 2
   const lampMats: THREE.MeshStandardMaterial[] = [];
 
   /* ---------------- ground base + lake + landmark ---------------- */
+  const grassTex = grassTexture();
+  grassTex.repeat.set(170, 150); // one tile ≈ 15 m
   const groundPlane = new THREE.Mesh(
     new THREE.PlaneGeometry(2600, 2300),
-    new THREE.MeshStandardMaterial({ color: 0x5d8147, roughness: 1 }),
+    new THREE.MeshStandardMaterial({ map: grassTex, roughness: 1 }),
   );
   groundPlane.rotation.x = -Math.PI / 2;
   groundPlane.position.set(0, -0.05, -60);
@@ -84,7 +87,7 @@ export function buildProps(net: RoadNetwork, collision: CollisionWorld, seed = 2
 
   const lake = new THREE.Mesh(
     new THREE.PlaneGeometry(2600, 600),
-    new THREE.MeshStandardMaterial({ color: 0x2c5f8a, roughness: 0.25, metalness: 0.55 }),
+    new THREE.MeshStandardMaterial({ color: 0x2e618c, roughness: 0.12, metalness: 0.4 }),
   );
   lake.rotation.x = -Math.PI / 2;
   lake.position.set(0, 0.02, 980);
@@ -147,6 +150,7 @@ export function buildProps(net: RoadNetwork, collision: CollisionWorld, seed = 2
     collision.addOBB({ x, z, heading, halfW: w / 2, halfL: d / 2, tag: 'building' });
   };
 
+  const roofRects: Array<{ x: number; z: number; w: number; d: number; h: number }> = [];
   const mkTower = (x: number, z: number, w: number, d: number, h: number, ti: number): void => {
     const texSet = buildingTexture(ti, ['#5d6770', '#6e6259', '#54616e', '#746a5e', '#616d62'][ti % 5], 6, Math.max(6, Math.round(h / 7)));
     const mat = new THREE.MeshStandardMaterial({
@@ -163,6 +167,7 @@ export function buildProps(net: RoadNetwork, collision: CollisionWorld, seed = 2
     mesh.castShadow = h < 60; // tallest towers skip shadow casting (shadow camera is small anyway)
     group.add(mesh);
     addBuildingCollider(x, z, w + 0.6, d + 0.6);
+    roofRects.push({ x, z, w, d, h });
   };
 
   const mkHouse = (x: number, z: number, heading: number, hi: number): void => {
@@ -266,6 +271,38 @@ export function buildProps(net: RoadNetwork, collision: CollisionWorld, seed = 2
     }
   }
 
+  /* ---------------- rooftop dressing (caps + AC units, instanced) -------- */
+  if (roofRects.length) {
+    const capGeo = new THREE.BoxGeometry(1, 1, 1);
+    const capMat = new THREE.MeshStandardMaterial({ color: 0x3d434b, roughness: 0.95 });
+    const caps = new THREE.InstancedMesh(capGeo, capMat, roofRects.length);
+    const units: Array<{ x: number; y: number; z: number; rot: number; s: number }> = [];
+    const mC = new THREE.Matrix4();
+    roofRects.forEach((r, i) => {
+      mC.makeScale(r.w - 1.4, 0.35, r.d - 1.4).setPosition(r.x, r.h + 0.12, r.z);
+      caps.setMatrixAt(i, mC);
+      const n = 1 + Math.floor(rng() * 3);
+      for (let k = 0; k < n; k++) {
+        units.push({
+          x: r.x + (rng() - 0.5) * (r.w - 5),
+          y: r.h + 0.3,
+          z: r.z + (rng() - 0.5) * (r.d - 5),
+          rot: rng() * Math.PI,
+          s: 0.8 + rng() * 0.9,
+        });
+      }
+    });
+    const acGeo = new THREE.BoxGeometry(2.0, 1.1, 1.4);
+    const acMat = new THREE.MeshStandardMaterial({ color: 0x8b9299, roughness: 0.6, metalness: 0.45 });
+    const acs = new THREE.InstancedMesh(acGeo, acMat, units.length);
+    units.forEach((u, i) => {
+      mC.makeRotationY(u.rot).multiply(new THREE.Matrix4().makeScale(u.s, u.s, u.s));
+      mC.setPosition(u.x, u.y + 0.55 * u.s, u.z);
+      acs.setMatrixAt(i, mC);
+    });
+    group.add(caps, acs);
+  }
+
   // forest band north of the highway + scattered south
   for (let i = 0; i < 110; i++) {
     treeSpots.push({ x: -940 + rng() * 1880, z: -740 + rng() * 60 });
@@ -278,22 +315,35 @@ export function buildProps(net: RoadNetwork, collision: CollisionWorld, seed = 2
     treeSpots.push({ x: -800 + rng() * 1600, z: -560 + rng() * 40 });
   }
 
-  /* ---------------- trees (instanced) ---------------- */
-  const trunkGeo = new THREE.CylinderGeometry(0.16, 0.24, 2.6, 6);
-  const crownGeo = new THREE.ConeGeometry(1.9, 4.6, 8);
+  /* ---------------- trees (instanced, layered blob crowns) ---------------- */
+  const trunkGeo = new THREE.CylinderGeometry(0.14, 0.26, 2.8, 7);
+  const blobLoGeo = new THREE.IcosahedronGeometry(1.9, 1);
+  const blobHiGeo = new THREE.IcosahedronGeometry(1.25, 1);
   const trunks = new THREE.InstancedMesh(trunkGeo, TRUNK_MAT, treeSpots.length);
-  const crowns = new THREE.InstancedMesh(crownGeo, CROWN_MAT, treeSpots.length);
-  crowns.castShadow = true;
+  const blobsLo = new THREE.InstancedMesh(blobLoGeo, CROWN_MAT, treeSpots.length);
+  const blobsHi = new THREE.InstancedMesh(blobHiGeo, CROWN_MAT, treeSpots.length);
+  blobsLo.castShadow = true;
   const m4 = new THREE.Matrix4();
+  const colA = new THREE.Color(0x3c6b32);
+  const colB = new THREE.Color(0x6f9446);
+  const cTmp = new THREE.Color();
   treeSpots.forEach((p, i) => {
     const s = 0.8 + rng() * 0.7;
-    m4.makeScale(s, s, s).setPosition(p.x, 1.3 * s, p.z);
+    m4.makeScale(s, s, s).setPosition(p.x, 1.4 * s, p.z);
     trunks.setMatrixAt(i, m4);
-    m4.makeScale(s, s, s).setPosition(p.x, (2.6 + 2.3) * s * 0.92, p.z);
-    crowns.setMatrixAt(i, m4);
+    const lean = (rng() - 0.5) * 0.5;
+    m4.makeRotationY(rng() * Math.PI).multiply(new THREE.Matrix4().makeScale(s * (1 + rng() * 0.25), s * (0.85 + rng() * 0.3), s));
+    m4.setPosition(p.x + lean * 0.4, 3.3 * s, p.z);
+    blobsLo.setMatrixAt(i, m4);
+    m4.makeRotationY(rng() * Math.PI).multiply(new THREE.Matrix4().makeScale(s, s, s));
+    m4.setPosition(p.x + lean, (3.3 + 1.45) * s, p.z + (rng() - 0.5) * 0.5);
+    blobsHi.setMatrixAt(i, m4);
+    cTmp.lerpColors(colA, colB, rng());
+    blobsLo.setColorAt(i, cTmp);
+    blobsHi.setColorAt(i, cTmp.offsetHSL(0, 0.02, 0.035));
     if (Math.abs(p.z) < 660) collision.addCircle({ x: p.x, z: p.z, r: 0.3, tag: 'tree' });
   });
-  group.add(trunks, crowns);
+  group.add(trunks, blobsLo, blobsHi);
 
   /* ---------------- streetlights along arterials ---------------- */
   const lampHeadGeo = new THREE.BoxGeometry(0.5, 0.12, 0.22);
