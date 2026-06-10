@@ -49,6 +49,8 @@ export interface EngineHooks {
   tick?: (dt: number) => void;
   /** Whether driving input should reach the car. */
   inputEnabled?: () => boolean;
+  /** Return true to take over pause handling (GameApp menus). */
+  onPauseRequest?: () => boolean;
 }
 
 const BLINK_PERIOD = 0.8;
@@ -263,7 +265,7 @@ export class Engine {
     for (const tap of this.input.drainTaps()) {
       switch (tap) {
         case 'pause':
-          this.setPaused(!this.paused);
+          if (!this.hooks.onPauseRequest?.()) this.setPaused(!this.paused);
           break;
         case 'help':
           this.hud.showHelp();
