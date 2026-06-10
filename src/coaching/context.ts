@@ -51,6 +51,8 @@ export interface DriveContext {
   speedKmh: number;
   gLong: number;
   gLat: number;
+  /** Brake pedal position 0..1 (distinguishes real braking from coasting decel). */
+  brakePedal: number;
   lane: LaneHit | null;
   laneObj: Lane | null;
   limitKmh: number;
@@ -302,6 +304,7 @@ export class ContextTracker {
       speedKmh: v.speedKmh,
       gLong: v.gLong,
       gLat: v.gLat,
+      brakePedal: v.brakePedal,
       lane,
       laneObj,
       limitKmh: this.world.speedLimitAt(v.x, v.z),

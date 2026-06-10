@@ -576,13 +576,14 @@ export class Engine {
       this.rearCam.lookAt(v.x - fwd.x * 30, v.y + 1.1, v.z - fwd.z * 30);
       this.rearCam.aspect = w / h;
       this.rearCam.updateProjectionMatrix();
-      const dpr = this.renderer.getPixelRatio();
+      // setScissor/setViewport take CSS pixels — three.js applies the pixel
+      // ratio itself, so pre-multiplying by dpr breaks on Retina displays
       this.renderer.setScissorTest(true);
-      this.renderer.setScissor(x * dpr, (window.innerHeight - y - h) * dpr, w * dpr, h * dpr);
-      this.renderer.setViewport(x * dpr, (window.innerHeight - y - h) * dpr, w * dpr, h * dpr);
+      this.renderer.setScissor(x, window.innerHeight - y - h, w, h);
+      this.renderer.setViewport(x, window.innerHeight - y - h, w, h);
       this.renderer.render(this.scene, this.rearCam);
       this.renderer.setScissorTest(false);
-      this.renderer.setViewport(0, 0, window.innerWidth * dpr, window.innerHeight * dpr);
+      this.renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
       this.hud.layoutMirror(x, y, w, h, true);
     } else {
       this.hud.layoutMirror(0, 0, 0, 0, false);

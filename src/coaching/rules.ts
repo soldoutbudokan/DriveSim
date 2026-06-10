@@ -208,6 +208,7 @@ class MirrorScan implements Rule {
   id = 'mirror-scan';
   private nagT = 0;
   private brakeMirrorCooldown = 0;
+  private brakingT = 0;
   update(ctx: DriveContext, sink: RuleSink): void {
     if (ctx.speedMs < 3) return;
     const age = ctx.time - ctx.lastMirror;
@@ -217,8 +218,14 @@ class MirrorScan implements Rule {
       sink.coach('Scan your mirrors every ~10 seconds (M).', 'info');
       this.nagT = 0;
     }
-    // mirror before sustained braking
-    if (ctx.gLong < -0.26 && ctx.speedMs > 7 && this.brakeMirrorCooldown <= 0) {
+    // mirror before sustained braking — requires an actual pedal press, so
+    // engine-braking / coasting deceleration never counts
+    if (ctx.brakePedal > 0.25 && ctx.gLong < -0.26 && ctx.speedMs > 7) {
+      this.brakingT += ctx.dt;
+    } else {
+      this.brakingT = 0;
+    }
+    if (this.brakingT > 0.5 && this.brakeMirrorCooldown <= 0) {
       if (age > 5) {
         sink.fault('no-mirror-brake', 'observation', 'minor', 'Braked without checking the mirror first', ctx);
       }
