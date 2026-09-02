@@ -9,12 +9,12 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { Emitter } from './events';
 import type { GameEvents, CameraMode } from './types';
 import { clamp, clamp01, headingForward, type V2 } from './math';
 import { AutoQuality, TIERS, type Tier } from './quality';
 import { SkySystem } from '../weather/sky';
+import { SkyDome } from '../weather/skyDome';
 import { WeatherSystem } from '../weather/weather';
 import { Input } from '../controls/input';
 import { Vehicle, type GroundSample, type VehiclePose } from '../vehicle/vehicle';
@@ -41,6 +41,10 @@ export interface WorldBase {
   onPropHit?(ref: unknown): void;
   /** Night factor 0..1 for emissives (streetlights, windows). */
   setNight?(f: number): void;
+  /** Rain sheen 0..1 on the road surfaces. */
+  setWetness?(f: number): void;
+  /** Snow cover 0..1. */
+  setSnow?(f: number): void;
 }
 
 export type SignalSide = 'off' | 'left' | 'right';
@@ -80,6 +84,7 @@ export class Engine {
   readonly hemi: THREE.HemisphereLight;
   readonly moon: THREE.DirectionalLight;
   readonly sky = new SkySystem();
+  readonly skyDome = new SkyDome();
   readonly weather: WeatherSystem;
   readonly autoQuality = new AutoQuality();
   tier: Tier = 'high';
@@ -148,17 +153,20 @@ export class Engine {
     this.sun.shadow.camera.right = sc;
     this.sun.shadow.camera.top = sc;
     this.sun.shadow.camera.bottom = -sc;
-    this.sun.shadow.bias = -0.0007;
+    this.sun.shadow.bias = -0.0004;
+    this.sun.shadow.normalBias = 0.035;
     this.moon = new THREE.DirectionalLight(0x8899ff, 0);
     this.scene.add(this.hemi, this.sun, this.sun.target, this.moon, this.moon.target);
     this.scene.fog = new THREE.Fog(0xbfd2e8, 250, 1500);
-    this.scene.background = new THREE.Color(0x9fc3ef);
+    this.scene.background = null;
+    this.scene.add(this.skyDome.mesh);
 
-    // image-based specular: car paint/glass/water pick up real reflections
-    const pmrem = new THREE.PMREMGenerator(this.renderer);
-    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    pmrem.dispose();
-    this.scene.environmentIntensity = 0.55;
+    // image-based lighting comes from the sky dome itself: car paint, glass
+    // and wet asphalt reflect the actual sky for the current hour/weather
+    this.sky.update(0, this.scene, this.sun, this.moon, this.hemi, 0, 0);
+    this.skyDome.update(0, 0, 0, 0, this.sky, this.sky.sunPos, this.sky.moonPos, this.sky.palette.fog);
+    this.scene.environment = this.skyDome.refreshEnvironment(this.renderer, this.sky, true);
+    this.scene.environmentIntensity = 1.0;
 
     this.weather = new WeatherSystem(this.scene);
     this.setQuality('high');
@@ -179,7 +187,8 @@ export class Engine {
     }
     this.weather.particleScale = cfg.particleScale;
     if (cfg.bloom && !this.composer) {
-      this.composer = new EffectComposer(this.renderer);
+      const rt = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, { type: THREE.HalfFloatType, samples: 4 });
+      this.composer = new EffectComposer(this.renderer, rt);
       this.renderPass = new RenderPass(this.scene, this.camera.camera);
       this.bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.28, 0.5, 0.82);
       this.composer.addPass(this.renderPass);
@@ -412,7 +421,11 @@ export class Engine {
   /** One simulation + render frame. */
   private frame = (tMs: number): void => {
     this.raf = requestAnimationFrame(this.frame);
-    const dt = Math.min((tMs - this.clockPrev) / 1000 || 0.016, 0.1);
+    // rAF timestamps can precede the clock captured after a long synchronous
+    // world build; a negative dt would make every exponential damp explode
+    let dt = (tMs - this.clockPrev) / 1000;
+    if (!(dt > 0)) dt = 0.016;
+    dt = Math.min(dt, 0.1);
     this.clockPrev = tMs;
     const fps = dt > 0 ? 1 / dt : 60;
     this.fpsSmooth += (fps - this.fpsSmooth) * 0.05;
@@ -448,8 +461,16 @@ export class Engine {
       const wv = v.worldVel;
       this.weather.update(dt, this.scene, v.x, v.y, v.z, wv.x, wv.z);
       this.sun.intensity *= 1 - this.weather.skyDim;
-      this.scene.environmentIntensity = 0.12 + 0.43 * (1 - this.sky.nightFactor) * (1 - this.weather.skyDim * 0.6);
+      this.skyDome.cloudCover = this.weather.cloudCover;
+      this.skyDome.overcast = this.weather.skyDim;
+      const cp = this.camera.camera.position;
+      this.skyDome.update(dt, cp.x, cp.y, cp.z, this.sky, this.sky.sunPos, this.sky.moonPos, (this.scene.fog as THREE.Fog).color);
+      const env = this.skyDome.refreshEnvironment(this.renderer, this.sky);
+      if (env && env !== this.scene.environment) this.scene.environment = env;
+      this.scene.environmentIntensity = 1.0 - this.weather.skyDim * 0.35;
       this.world.setNight?.(this.sky.nightFactor);
+      this.world.setWetness?.(this.weather.wetness);
+      this.world.setSnow?.(this.weather.snowCover);
       this.weatherMu = this.weather.gripMul;
       this.weatherDrag = this.weather.kind === 'snow' ? 60 : 0;
       if (this.simulate && this.autoHeadlights && this.sky.nightFactor > 0.55 && this.prevNight <= 0.55) this.headlights = true;

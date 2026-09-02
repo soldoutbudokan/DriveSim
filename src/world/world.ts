@@ -13,7 +13,7 @@ import type { GroundSample, VehiclePose } from '../vehicle/vehicle';
 import type { WorldBase } from '../core/engine';
 import { RoadNetwork, type Lane, SIDEWALK_W } from './network';
 import { buildMapDefs, LOT_RECT, MANEUVERS, PARKING_BAYS, PXO, SPAWNS, ZONES, type ZoneDef } from './map';
-import { buildRoadGeometry } from './geometry';
+import { buildRoadGeometry, type RoadGroup } from './geometry';
 import { SignalSystem, type LightState } from './signals';
 import { buildProps, type PropsResult } from './props';
 
@@ -42,16 +42,24 @@ export class CityWorld implements WorldBase {
   readonly signals: SignalSystem;
   readonly props: PropsResult;
   readonly pxo: PxoState;
+  private roads: RoadGroup;
   readonly zones: ZoneDef[] = ZONES;
 
   constructor() {
+    const t0 = performance.now();
     const defs = buildMapDefs();
     this.net = new RoadNetwork(defs.nodes, defs.edges);
-    this.group.add(buildRoadGeometry(this.net));
+    const t1 = performance.now();
+    this.roads = buildRoadGeometry(this.net);
+    this.group.add(this.roads);
+    const t2 = performance.now();
     this.signals = new SignalSystem(this.net);
     this.group.add(this.signals.group);
+    const t3 = performance.now();
     this.props = buildProps(this.net, this.collision);
     this.group.add(this.props.group);
+    const t4 = performance.now();
+    console.info(`DriveSim world built in ${Math.round(t4 - t0)} ms (network ${Math.round(t1 - t0)}, roads ${Math.round(t2 - t1)}, signals ${Math.round(t3 - t2)}, props ${Math.round(t4 - t3)})`);
 
     const pxoEdge = this.net.edge(PXO.edgeId);
     const smp = polylineAt(pxoEdge.center, PXO.s);
@@ -159,6 +167,16 @@ export class CityWorld implements WorldBase {
 
   setNight(f: number): void {
     this.props.setNight(f);
+  }
+
+  /** Rain sheen on asphalt / paint (0..1). */
+  setWetness(f: number): void {
+    this.roads.setWetness?.(f);
+  }
+
+  /** Snow cover on grass (0..1). */
+  setSnow(f: number): void {
+    this.props.setSnow(f);
   }
 
   update(dt: number, simTime: number): void {

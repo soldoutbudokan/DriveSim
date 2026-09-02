@@ -10,12 +10,14 @@ import type { CityWorld } from '../world/world';
 import type { EdgeRT } from '../world/network';
 import { PXO } from '../world/map';
 import type { TrafficContext } from './manager';
+import { buildFigure, type Figure } from './figure';
 
 type PedState = 'walk' | 'waitCross' | 'cross' | 'pxoWait' | 'pxoCross';
 
 interface Ped {
   id: string;
   group: THREE.Group;
+  fig: Figure;
   state: PedState;
   edge: EdgeRT;
   /** +1 = left sidewalk of from→to, -1 = right. */
@@ -33,9 +35,7 @@ interface Ped {
   pxoUser: boolean;
 }
 
-const COUNT = 14;
-const SKIN = [0xc9a188, 0x8a6248, 0x6e4a34, 0xd8b49a];
-const SHIRT = [0x5a7d9a, 0x9a5a5a, 0x6a8a5a, 0x8a7a9a, 0xd0c8b8, 0x44505e, 0xb86a3a];
+const COUNT = 16;
 
 export class PedestrianSystem {
   private peds: Ped[] = [];
@@ -45,28 +45,13 @@ export class PedestrianSystem {
   constructor(world: CityWorld, parent: THREE.Group) {
     this.world = world;
     for (let i = 0; i < COUNT; i++) {
-      const group = new THREE.Group();
-      const body = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.17, 0.2, 0.92, 7),
-        new THREE.MeshStandardMaterial({ color: SHIRT[i % SHIRT.length], roughness: 0.9 }),
-      );
-      body.position.y = 0.78;
-      body.castShadow = true;
-      const head = new THREE.Mesh(
-        new THREE.SphereGeometry(0.13, 8, 7),
-        new THREE.MeshStandardMaterial({ color: SKIN[i % SKIN.length], roughness: 0.8 }),
-      );
-      head.position.y = 1.42;
-      const legs = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.13, 0.16, 0.62, 7),
-        new THREE.MeshStandardMaterial({ color: 0x2e3540, roughness: 0.95 }),
-      );
-      legs.position.y = 0.31;
-      group.add(body, head, legs);
+      const fig = buildFigure(this.rng, 0.92 + this.rng() * 0.16);
+      const group = fig.root;
       parent.add(group);
       const ped: Ped = {
         id: `ped${i}`,
         group,
+        fig,
         state: 'walk',
         edge: world.net.edge('qn3'),
         side: 1,
@@ -138,14 +123,16 @@ export class PedestrianSystem {
     let pxoCrossing = 0;
 
     for (const ped of this.peds) {
-      ped.bobT += dt * (ped.state === 'walk' || ped.state === 'cross' || ped.state === 'pxoCross' ? 7 : 0);
+      const moving = ped.state === 'walk' || ped.state === 'cross' || ped.state === 'pxoCross';
+      ped.bobT += dt * (moving ? 6.5 : 0);
+      ped.fig.walk(ped.bobT, moving ? 1 : 0);
 
       if (ped.state === 'walk') {
         ped.s += ped.dir * ped.speed * dt;
         const pos = this.sidewalkPos(ped);
         ped.x = pos.x;
         ped.z = pos.z;
-        ped.group.position.set(pos.x, 0.12 + Math.abs(Math.sin(ped.bobT)) * 0.03, pos.z);
+        ped.group.position.set(pos.x, 0.12, pos.z);
         ped.group.rotation.y = pos.heading;
 
         // PXO opportunity
@@ -204,7 +191,8 @@ export class PedestrianSystem {
         const off = startOff + (endOff - startOff) * Math.min(ped.crossT, 1);
         ped.x = smp.point.x + smp.dir.z * off;
         ped.z = smp.point.z - smp.dir.x * off;
-        ped.group.position.set(ped.x, 0.1 + Math.abs(Math.sin(ped.bobT)) * 0.03, ped.z);
+        ped.group.position.set(ped.x, 0.04, ped.z);
+        ped.group.rotation.y = Math.atan2(smp.dir.z * -ped.side, -smp.dir.x * -ped.side);
         if (ped.crossT >= 1) {
           ped.side = -ped.side as 1 | -1;
           ped.state = 'walk';
@@ -227,7 +215,8 @@ export class PedestrianSystem {
         const off = startOff + (endOff - startOff) * Math.min(ped.crossT, 1);
         ped.x = smp.point.x + smp.dir.z * off;
         ped.z = smp.point.z - smp.dir.x * off;
-        ped.group.position.set(ped.x, 0.1 + Math.abs(Math.sin(ped.bobT)) * 0.03, ped.z);
+        ped.group.position.set(ped.x, 0.04, ped.z);
+        ped.group.rotation.y = Math.atan2(smp.dir.z * -ped.side, -smp.dir.x * -ped.side);
         if (ped.crossT >= 1) {
           ped.side = -ped.side as 1 | -1;
           ped.state = 'walk';

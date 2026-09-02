@@ -77,17 +77,21 @@ The Vite config uses `base: './'` (relative asset URLs), so the build works at `
 src/
   core/        engine loop, events, math, quality tiers (auto 60 fps target)
   vehicle/     bicycle-model dynamics: Pacejka tires + friction circle, weight
-               transfer, torque-converter automatic, ABS, handbrake, grade forces
+               transfer, torque-converter automatic, ABS, handbrake, grade forces;
+               parametric lofted vehicle bodies (loft.ts) + the car factory
   physics/     2D OBB/circle collision with spatial hashing
   controls/    keyboard analog emulation + gamepad mapping
   camera/      chase / cockpit / top-down + shoulder-glance & mirror views
   audio/       procedural engine (RPM-pitched), blinker, skid, wind, rain,
                horn, impacts, positional siren, streetcar bell, ambient city
   world/       road network graph → lanes/turns/controls, procedural roads &
-               markings, Ontario signals (advanced green, PXO), props/buildings
+               markings, Ontario mast-arm signals (advanced green, PXO),
+               procedural material toolkit (materials.ts), building generators,
+               vegetation, street furniture, geometry batching
   traffic/     IDM car-following agents with full rule obedience, streetcar,
-               school bus, emergency vehicles, pedestrians, cyclists
-  weather/     day/night cycle, rain/fog/snow with grip + visibility effects
+               school bus, emergency vehicles, articulated pedestrians, cyclists
+  weather/     day/night cycle, shader sky dome + sky-baked environment map,
+               rain/fog/snow with grip, visibility, wet-road and snow effects
   coaching/    DriveContext tracker + 16 graded habit rules + the coach
   scoring/     DriveTest-style weighted rubric + report computation
   examiner/    routed spoken mock test with maneuver grading + re-routing
@@ -99,7 +103,7 @@ src/
   ui/          HUD, minimap, menus, report card, styles
 ```
 
-**Rendering & look**: no 3D assets — vehicles are beveled, extruded side-profile shells (per-silhouette sedan/hatch/SUV, rounded shells for buses, trucks and the streetcar) with inset glass greenhouses and wheel-arch shadows, lit by ACES tone mapping + image-based reflections (PMREM `RoomEnvironment`, intensity tracking the day/night cycle) and bloom at high quality tiers. Roads carry the full Ontario paint set — double-yellow centrelines, dashed white lane dividers, solid edge lines, stop bars, zebra crosswalks, yield teeth, HOV diamonds — over canvas-generated asphalt (aggregate, patch scars, cracks), with raised curbs, slab-jointed concrete sidewalks, textured grass, layered blob-crown trees and rooftop AC clutter on the towers.
+**Rendering & look**: still no 3D assets — every mesh and texture is generated at runtime, but the generators do real modelling now. Vehicles are parametric lofts: a handful of side-profile curves (roof line, belt line, sill, width) are swept into a watertight hull with cut wheel arches, crease-aware normals and true glass regions in the skin, then dressed with lathe-turned tires on spoked rims, headlamp clusters behind clear lenses, wrap-around tail bars, mirrors, handles, wipers, Ontario plates and a full interior (dashboard, seats, a steering wheel that turns with your input) visible through the glazing. Paint is clear-coated and reflects an environment map baked from the sky itself. The sky is a single shader dome — zenith-to-horizon gradient, sun disc and haze, drifting cloud layer, moon and a twinkling star field — that also drives fog colour and the image-based lighting for every hour of the day/night cycle. The district is modelled block by block: glass and ribbon-window towers on storefront podiums with setbacks, parapets and mechanical penthouses; condo midrises with balconies; Toronto bay-and-gable semis with steep gables, bay windows, columned porches, railings, steps, chimneys and trimmed windows; industrial yards with corrugated sheds, roll-up doors, loading docks and chain-link; a school with a yard, courts and playground; the DriveTest centre with its lot. Facades use generated brick, shingle, corrugated-steel, curtain-wall and storefront texture sets with normal, roughness and night-emissive maps, and a macro-variation shader kills the tiling on grass and asphalt. Streets carry cobra-head lights with night light pools, wooden hydro poles with sagging wires, streetcar catenary, Ontario mast-arm signals with visors, backboards and walk/hand pedestrian heads, hydrants, Canada Post boxes, benches, transit shelters, highway guardrails, overhead gantries and high-mast lighting, a landscaped roundabout island, and a construction site with barrels, jersey barriers and an excavator. Trees are trunk-and-branch models with alpha-cut leaf cards (maple, oak, spruce), instanced with per-tree tint. Roads are multi-vertex asphalt strips with wheel-track wear, oil lines and gutter grime baked into vertex colour over aggregate normal/roughness maps, plus the full Ontario paint set, painted turn arrows, manholes and tactile curb plates; rain turns the surfaces glossy and snow whitens the ground. Pedestrians and cyclists are articulated figures with swinging limbs and pedalling legs. ACES tone mapping, MSAA on the bloom path, soft shadows with normal-bias, and a lake with rippled reflective water under a CN-Tower-style landmark and a distant skyline finish the picture.
 
 **Physics**: a dynamic single-track (bicycle) model — Pacejka lateral forces per axle, longitudinal/lateral combination through a friction circle (throttle-on understeer, handbrake oversteer emerge naturally), longitudinal weight transfer feeding axle loads, surface/weather grip multipliers, road-grade forces (hills genuinely roll back), kinematic blending below ~3.5 m/s for parking-speed sanity, 240 Hz substeps. The trainer car is tuned to driving-school spec: keyboard throttle/steering ramp in gradually, steering authority falls off with speed so you can hold a lane centre at 50 km/h, and a comfort governor caps a floored launch around 0.38 g — brisk, but under the examiner's harsh-acceleration line.
 
