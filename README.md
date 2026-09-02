@@ -4,7 +4,7 @@ A browser-based, Toronto-flavoured driving simulator built to train for the **On
 
 > ⚠️ **DriveSim is a practice aid.** It is not a substitute for real supervised road time or the official [MTO Driver's Handbook](https://www.ontario.ca/document/official-mto-drivers-handbook).
 
-![DriveSim — illustrative mock; replace with a real capture](docs/screenshot.svg)
+![DriveSim — Queen St W in free roam](docs/screenshot.jpg)
 
 ## Live demo
 
