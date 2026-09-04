@@ -1,8 +1,8 @@
 /**
  * Geometry batching for static world dressing: collect transformed
- * geometries per material key and merge each key into a single mesh, so a
- * whole district of buildings, poles and furniture costs a few dozen draw
- * calls. Also provides metre-scaled box UVs so tiled surface textures keep
+ * geometries per material key and nearby cell, so off-screen parts of the
+ * district can be culled without drawing each small object separately.
+ * Also provides metre-scaled box UVs so tiled surface textures keep
  * a constant real-world size across every building.
  */
 
@@ -14,6 +14,7 @@ const Q = new THREE.Quaternion();
 const E = new THREE.Euler();
 const V = new THREE.Vector3();
 const S = new THREE.Vector3();
+const CELL_SIZE = 160;
 
 export class GeoBatch {
   private lists = new Map<string, THREE.BufferGeometry[]>();
@@ -57,7 +58,7 @@ export class GeoBatch {
     return out;
   }
 
-  /** Merge every key into one mesh with the matching material. */
+  /** Merge each material within spatial cells, preserving full geometry bounds. */
   build(materials: Map<string, THREE.Material>, group: THREE.Object3D, opts: { shadows?: boolean; receive?: boolean } = {}): THREE.Mesh[] {
     const out: THREE.Mesh[] = [];
     for (const [key, arr] of this.lists) {
@@ -66,17 +67,29 @@ export class GeoBatch {
         console.warn(`GeoBatch: no material for key "${key}" (${arr.length} geometries)`);
         continue;
       }
-      const merged = mergeGeometries(arr.map(normalizeAttrs), false);
-      if (!merged) {
-        console.error(`GeoBatch: merge failed for "${key}"`);
-        continue;
+      const cells = new Map<string, THREE.BufferGeometry[]>();
+      for (const geo of arr) {
+        geo.computeBoundingBox();
+        geo.boundingBox!.getCenter(V);
+        const cell = `${Math.floor(V.x / CELL_SIZE)},${Math.floor(V.z / CELL_SIZE)}`;
+        let local = cells.get(cell);
+        if (!local) cells.set(cell, local = []);
+        local.push(geo);
       }
-      const mesh = new THREE.Mesh(merged, mat);
-      mesh.castShadow = opts.shadows ?? true;
-      mesh.receiveShadow = opts.receive ?? true;
-      mesh.name = key;
-      group.add(mesh);
-      out.push(mesh);
+      for (const [cell, local] of cells) {
+        const merged = mergeGeometries(local.map(normalizeAttrs), false);
+        if (!merged) {
+          console.error(`GeoBatch: merge failed for "${key}"`);
+          continue;
+        }
+        merged.computeBoundingSphere();
+        const mesh = new THREE.Mesh(merged, mat);
+        mesh.castShadow = opts.shadows ?? true;
+        mesh.receiveShadow = opts.receive ?? true;
+        mesh.name = `${key}:${cell}`;
+        group.add(mesh);
+        out.push(mesh);
+      }
     }
     this.lists.clear();
     return out;

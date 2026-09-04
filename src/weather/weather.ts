@@ -158,6 +158,7 @@ export class WeatherSystem {
     this.snow.visible = snowOn > 0.01;
 
     const activeRain = Math.floor(RAIN_COUNT * this.particleScale);
+    this.rain.geometry.setDrawRange(0, activeRain * 2);
     if (this.rain.visible) {
       const pos = this.rain.geometry.getAttribute('position') as THREE.BufferAttribute;
       const arr = pos.array as Float32Array;
@@ -177,9 +178,12 @@ export class WeatherSystem {
           arr[i * 6 + 5] = z - vz * 0.02;
         }
       }
+      pos.clearUpdateRanges();
+      pos.addUpdateRange(0, activeRain * 6);
       pos.needsUpdate = true;
     }
     const activeSnow = Math.floor(SNOW_COUNT * this.particleScale);
+    this.snow.geometry.setDrawRange(0, activeSnow);
     if (this.snow.visible) {
       const pos = this.snow.geometry.getAttribute('position') as THREE.BufferAttribute;
       const arr = pos.array as Float32Array;
@@ -193,6 +197,8 @@ export class WeatherSystem {
           arr[i * 3 + 2] = pz + (Math.random() - 0.5) * BOX.d + vz * 2;
         }
       }
+      pos.clearUpdateRanges();
+      pos.addUpdateRange(0, activeSnow * 3);
       pos.needsUpdate = true;
     }
   }

@@ -46,7 +46,8 @@ export class GameApp {
   onQuitDrive: (() => void) | null = null;
 
   constructor(appEl: HTMLElement, uiEl: HTMLElement) {
-    this.engine = new Engine(appEl, uiEl);
+    this.settings = loadSettings();
+    this.engine = new Engine(appEl, uiEl, this.settings.tier === 'auto' ? 'medium' : this.settings.tier);
     this.world = new CityWorld();
     this.engine.setWorld(this.world);
     this.engine.attachMinimap(this.world.net);
@@ -54,7 +55,6 @@ export class GameApp {
     this.engine.attachTraffic(this.traffic);
     this.coach = new Coach(this.engine, this.world, this.traffic);
     this.menus = new Menus(uiEl);
-    this.settings = loadSettings();
     this.lessonRunner = new LessonRunner(this);
     this.examiner = new Examiner(this);
     this.recorder = new Recorder(this);
@@ -65,7 +65,6 @@ export class GameApp {
       if (this.mode === 'exam') this.engine.audio.click(380, 0.035);
     });
 
-    this.engine.buildPlayer(this.settings.carColor);
     this.applySettings();
 
     this.engine.hooks.tick = (dt) => this.tick(dt);

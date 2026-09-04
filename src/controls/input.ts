@@ -74,7 +74,7 @@ export class Input {
   constructor() {
     window.addEventListener('keydown', (e) => this.onKey(e, true));
     window.addEventListener('keyup', (e) => this.onKey(e, false));
-    window.addEventListener('blur', () => this.releaseAll());
+    window.addEventListener('blur', () => this.reset());
     const gesture = () => {
       if (this.gestureSeen) return;
       this.gestureSeen = true;
@@ -93,7 +93,7 @@ export class Input {
 
   setEnabled(on: boolean): void {
     this.enabled = on;
-    if (!on) this.releaseAll();
+    if (!on) this.reset();
   }
 
   /** Drain tap actions queued since last call. */
@@ -103,10 +103,15 @@ export class Input {
     return t;
   }
 
-  private releaseAll(): void {
+  reset(): void {
     this.keys.clear();
+    this.taps.length = 0;
+    this.prevPadButtons.length = 0;
+    this.rawSteer = 0;
     this.state.throttle = 0;
     this.state.brake = 0;
+    this.state.steer = 0;
+    this.state.precise = false;
     this.state.handbrake = false;
     this.state.horn = false;
   }

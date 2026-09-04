@@ -149,7 +149,8 @@ export class SkyDome {
   readonly material: THREE.ShaderMaterial;
   private envScene = new THREE.Scene();
   private envMesh: THREE.Mesh;
-  private envTex: THREE.Texture | null = null;
+  private envTarget: THREE.WebGLRenderTarget | null = null;
+  private pmrem: THREE.PMREMGenerator | null = null;
   private envHour = -99;
   private envOvercast = -1;
   private cloudOffset = new THREE.Vector2(0, 0);
@@ -219,15 +220,14 @@ export class SkyDome {
    */
   refreshEnvironment(renderer: THREE.WebGLRenderer, sky: SkySystem, force = false): THREE.Texture | null {
     const moved = Math.abs(sky.hour - this.envHour) > 0.18 || Math.abs(this.overcast - this.envOvercast) > 0.08;
-    if (!force && this.envTex && !moved) return this.envTex;
-    const pmrem = new THREE.PMREMGenerator(renderer);
-    const prev = this.envTex;
-    const target = pmrem.fromScene(this.envScene, 0.02, 0.1, 100);
-    this.envTex = target.texture;
-    pmrem.dispose();
+    if (!force && this.envTarget && !moved) return this.envTarget.texture;
+    this.pmrem ??= new THREE.PMREMGenerator(renderer);
+    const prev = this.envTarget;
+    this.envTarget = this.pmrem.fromScene(this.envScene, 0.02, 0.1, 100);
+    // Dispose the target, which also owns the framebuffer and depth buffer.
     prev?.dispose();
     this.envHour = sky.hour;
     this.envOvercast = this.overcast;
-    return this.envTex;
+    return this.envTarget.texture;
   }
 }
