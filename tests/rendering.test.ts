@@ -65,3 +65,28 @@ describe('graphics resource lifecycle', () => {
     nextTarget.dispose();
   });
 });
+
+describe('shadow map toggling', () => {
+  it('recompiles scene materials only when shadow maps turn on or off', () => {
+    vi.stubGlobal('window', { innerWidth: 1280, innerHeight: 720 });
+    vi.stubGlobal('devicePixelRatio', 1);
+    const renderer = { setPixelRatio() {}, getPixelRatio: () => 1, shadowMap: { enabled: true } };
+    const scene = new THREE.Scene();
+    const mat = new THREE.MeshStandardMaterial();
+    scene.add(new THREE.Mesh(new THREE.BoxGeometry(), mat));
+    const engine = Object.assign(Object.create(Engine.prototype), {
+      renderer, sun: new THREE.DirectionalLight(), weather: {}, scene,
+      camera: { camera: new THREE.PerspectiveCamera() }, composer: null, bloomPass: null,
+    }) as Engine;
+    const v0 = mat.version;
+    engine.setQuality('medium'); // shadows stay on
+    expect(mat.version).toBe(v0);
+    engine.setQuality('low'); // off: old programs would keep sampling a disposed map
+    expect(renderer.shadowMap.enabled).toBe(false);
+    expect(mat.version).toBe(v0 + 1);
+    engine.setQuality('low');
+    expect(mat.version).toBe(v0 + 1);
+    engine.setQuality('medium'); // back on: programs need USE_SHADOWMAP again
+    expect(mat.version).toBe(v0 + 2);
+  });
+});

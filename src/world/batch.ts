@@ -14,7 +14,11 @@ const Q = new THREE.Quaternion();
 const E = new THREE.Euler();
 const V = new THREE.Vector3();
 const S = new THREE.Vector3();
-const CELL_SIZE = 160;
+// Cell size for the static batches. Measured at 1600x900 on the district:
+// 160 m cells cost ~80% more draw calls than one mesh per material for
+// 10-25% fewer triangles; 400 m keeps most of the triangle (and shadow-pass)
+// saving for 10-20% more calls.
+const CELL_SIZE = 400;
 
 export class GeoBatch {
   private lists = new Map<string, THREE.BufferGeometry[]>();

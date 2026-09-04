@@ -190,13 +190,27 @@ export class Engine {
     this.tier = tier;
     const cfg = TIERS[tier];
     this.renderer.setPixelRatio(renderPixelRatio(tier, window.innerWidth, window.innerHeight, devicePixelRatio));
-    this.renderer.shadowMap.enabled = cfg.shadowMap > 0;
-    if (this.sun.shadow.mapSize.x !== cfg.shadowMap || cfg.shadowMap === 0) {
+    const shadowsOn = cfg.shadowMap > 0;
+    const shadowsToggled = this.renderer.shadowMap.enabled !== shadowsOn;
+    this.renderer.shadowMap.enabled = shadowsOn;
+    if (this.sun.shadow.mapSize.x !== cfg.shadowMap || !shadowsOn) {
       this.sun.shadow.map?.dispose();
       this.sun.shadow.map = null;
     }
-    if (cfg.shadowMap > 0) {
+    if (shadowsOn) {
       this.sun.shadow.mapSize.set(cfg.shadowMap, cfg.shadowMap);
+    }
+    if (shadowsToggled) {
+      // three.js bakes USE_SHADOWMAP into each lit program when it compiles
+      // and does not recompile when shadowMap.enabled changes, so without
+      // this the old programs keep sampling a shadow map that no longer
+      // exists (GL_INVALID_OPERATION on every draw) or never learn about a
+      // new one.
+      this.scene.traverse((o) => {
+        const m = (o as THREE.Mesh).material;
+        if (!m) return;
+        for (const mat of Array.isArray(m) ? m : [m]) mat.needsUpdate = true;
+      });
     }
     this.weather.particleScale = cfg.particleScale;
     if (cfg.bloom && !this.composer) {

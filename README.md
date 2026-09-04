@@ -64,8 +64,8 @@ the interface stays at native resolution. Medium uses a 900p pixel budget, High
 1440p, and Ultra 4K. These are area limits, so ultrawide and Retina displays stay
 within the same budget. Ultra remains opt-in.
 
-Static building and furniture batches are split into 160 m cells so off-screen
-geometry can be culled. Weather quality reduces both the particles drawn and
+Static building and furniture batches are split into 400 m cells so off-screen
+geometry can be culled, mostly in the shadow pass. Weather quality reduces both the particles drawn and
 the data uploaded to the GPU. The HUD and minimap refresh at 20 Hz independently
 of rendering. Switching tabs suspends the loop and clears held controls; returning
 resumes without catching up time spent in the background.
