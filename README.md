@@ -55,6 +55,29 @@ Full Ontario signal phases incl. **advanced green / protected left arrows** · *
 
 ## Run locally
 
+### Performance on laptops
+
+Graphics **Auto** starts at Medium, lowers quality under sustained load, and only
+raises it after sustained headroom. **Settings → Graphics → Low** disables
+shadows and bloom and limits the 3D drawing buffer to roughly 720p worth of pixels;
+the interface stays at native resolution. Medium uses a 900p pixel budget, High
+1440p, and Ultra 4K. These are area limits, so ultrawide and Retina displays stay
+within the same budget. Ultra remains opt-in.
+
+Static building and furniture batches are split into 400 m cells so off-screen
+geometry can be culled, mostly in the shadow pass. Weather quality reduces both the particles drawn and
+the data uploaded to the GPU. The HUD and minimap refresh at 20 Hz independently
+of rendering. Switching tabs suspends the loop and clears held controls; returning
+resumes without catching up time spent in the background.
+
+For a hardware comparison, use the same window size, camera, weather and route
+on both revisions, allow traffic and shaders to warm up, and compare frame times
+in the browser Performance panel. Test mirrors, resizing, High → Low → High,
+and switching away while holding a driving key. Automated regression tests cover
+quality budgets, culling, particle counts, input reset and graphics-buffer cleanup.
+
+### Development
+
 ```bash
 npm install
 npm run dev        # Vite dev server
@@ -66,6 +89,8 @@ npm run preview    # serve the production build
 ## Deploying to GitHub Pages
 
 `.github/workflows/deploy.yml` builds, tests and deploys `dist/` to Pages on every push to `main`. One-time setup: **Settings → Pages → Source: GitHub Actions**.
+
+Pull requests run tests and the production build in `.github/workflows/check.yml`.
 
 The Vite config uses `base: './'` (relative asset URLs), so the build works at `https://<user>.github.io/<any-repo-name>/` **without changes even if you rename the repo** — only the live URL above would change.
 

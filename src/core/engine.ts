@@ -12,7 +12,7 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { Emitter } from './events';
 import type { GameEvents, CameraMode } from './types';
 import { clamp, clamp01, headingForward, type V2 } from './math';
-import { AutoQuality, TIERS, type Tier } from './quality';
+import { AutoQuality, TIERS, renderPixelRatio, type Tier } from './quality';
 import { SkySystem } from '../weather/sky';
 import { SkyDome } from '../weather/skyDome';
 import { WeatherSystem } from '../weather/weather';
@@ -87,7 +87,7 @@ export class Engine {
   readonly skyDome = new SkyDome();
   readonly weather: WeatherSystem;
   readonly autoQuality = new AutoQuality();
-  tier: Tier = 'high';
+  tier: Tier = 'medium';
   /** Auto-headlights at night (toggleable in settings). */
   autoHeadlights = true;
   private prevNight = 0;
@@ -122,14 +122,17 @@ export class Engine {
   private rearCam: THREE.PerspectiveCamera;
   private clockPrev = 0;
   private raf = 0;
+  private running = false;
+  private hudElapsed = 0;
   /** Per-frame fps sampling for the auto quality tier. */
   fpsSmooth = 60;
   private collisionCooldown = 0;
 
-  constructor(appEl: HTMLElement, uiEl: HTMLElement) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  constructor(appEl: HTMLElement, uiEl: HTMLElement, initialTier: Tier = 'medium') {
+    this.tier = initialTier;
+    this.renderer = new THREE.WebGLRenderer({ antialias: TIERS[initialTier].antialias, powerPreference: 'high-performance' });
+    this.renderer.setPixelRatio(renderPixelRatio(initialTier, window.innerWidth, window.innerHeight, devicePixelRatio));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -169,33 +172,64 @@ export class Engine {
     this.scene.environmentIntensity = 1.0;
 
     this.weather = new WeatherSystem(this.scene);
-    this.setQuality('high');
+    this.setQuality(initialTier);
 
     window.addEventListener('resize', () => this.onResize());
+    document.addEventListener('visibilitychange', () => {
+      cancelAnimationFrame(this.raf);
+      this.input.reset();
+      this.autoQuality.reset();
+      this.fpsSmooth = 60;
+      this.clockPrev = 0;
+      if (this.running && !document.hidden) this.raf = requestAnimationFrame(this.frame);
+    });
     this.input.onFirstGesture(() => this.audio.init());
   }
 
   setQuality(tier: Tier): void {
     this.tier = tier;
     const cfg = TIERS[tier];
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, cfg.pixelRatioCap));
-    this.renderer.shadowMap.enabled = cfg.shadowMap > 0;
-    if (cfg.shadowMap > 0) {
-      this.sun.shadow.mapSize.set(cfg.shadowMap, cfg.shadowMap);
+    this.renderer.setPixelRatio(renderPixelRatio(tier, window.innerWidth, window.innerHeight, devicePixelRatio));
+    const shadowsOn = cfg.shadowMap > 0;
+    const shadowsToggled = this.renderer.shadowMap.enabled !== shadowsOn;
+    this.renderer.shadowMap.enabled = shadowsOn;
+    if (this.sun.shadow.mapSize.x !== cfg.shadowMap || !shadowsOn) {
       this.sun.shadow.map?.dispose();
       this.sun.shadow.map = null;
     }
+    if (shadowsOn) {
+      this.sun.shadow.mapSize.set(cfg.shadowMap, cfg.shadowMap);
+    }
+    if (shadowsToggled) {
+      // three.js bakes USE_SHADOWMAP into each lit program when it compiles
+      // and does not recompile when shadowMap.enabled changes, so without
+      // this the old programs keep sampling a shadow map that no longer
+      // exists (GL_INVALID_OPERATION on every draw) or never learn about a
+      // new one.
+      this.scene.traverse((o) => {
+        const m = (o as THREE.Mesh).material;
+        if (!m) return;
+        for (const mat of Array.isArray(m) ? m : [m]) mat.needsUpdate = true;
+      });
+    }
     this.weather.particleScale = cfg.particleScale;
     if (cfg.bloom && !this.composer) {
-      const rt = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, { type: THREE.HalfFloatType, samples: 4 });
-      this.composer = new EffectComposer(this.renderer, rt);
+      this.composer = new EffectComposer(this.renderer);
+      this.composer.renderTarget1.samples = 4;
+      this.composer.renderTarget2.samples = 4;
       this.renderPass = new RenderPass(this.scene, this.camera.camera);
       this.bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.28, 0.5, 0.82);
       this.composer.addPass(this.renderPass);
       this.composer.addPass(this.bloomPass);
       this.composer.addPass(new OutputPass());
     }
-    if (this.bloomPass) this.bloomPass.enabled = cfg.bloom;
+    if (!cfg.bloom && this.composer) {
+      for (const pass of this.composer.passes) pass.dispose();
+      this.composer.dispose();
+      this.composer = null;
+      this.bloomPass = null;
+    }
+    this.composer?.setPixelRatio(this.renderer.getPixelRatio());
   }
 
   setWorld(world: WorldBase): void {
@@ -420,15 +454,15 @@ export class Engine {
 
   /** One simulation + render frame. */
   private frame = (tMs: number): void => {
+    if (!this.running || document.hidden) return;
     this.raf = requestAnimationFrame(this.frame);
     // rAF timestamps can precede the clock captured after a long synchronous
     // world build; a negative dt would make every exponential damp explode
-    let dt = (tMs - this.clockPrev) / 1000;
-    if (!(dt > 0)) dt = 0.016;
-    dt = Math.min(dt, 0.1);
+    const elapsed = this.clockPrev > 0 ? Math.max(0, (tMs - this.clockPrev) / 1000) : 1 / 60;
+    const dt = Math.min(elapsed, 0.1);
     this.clockPrev = tMs;
-    const fps = dt > 0 ? 1 / dt : 60;
-    this.fpsSmooth += (fps - this.fpsSmooth) * 0.05;
+    const fps = elapsed > 0 ? 1 / elapsed : 60;
+    this.fpsSmooth += (fps - this.fpsSmooth) * (1 - Math.exp(-elapsed * 3));
 
     this.input.update(dt);
     this.handleTaps();
@@ -479,7 +513,7 @@ export class Engine {
       this.hooks.tick?.(dt);
     }
 
-    const newTier = this.autoQuality.evaluate(dt, this.fpsSmooth);
+    const newTier = this.paused ? null : this.autoQuality.evaluate(elapsed, this.fpsSmooth);
     if (newTier) {
       this.setQuality(newTier);
       this.hud.toast(`Graphics auto-adjusted to ${newTier}.`, 'info');
@@ -555,27 +589,31 @@ export class Engine {
       this.audio.bell();
     }
 
-    // HUD
-    const loc = this.world.locationAt(v.x, v.z);
-    this.hud.update({
-      speedKmh: v.speedKmh,
-      limitKmh: this.world.speedLimitAt(v.x, v.z),
-      rpmFrac: clamp01((v.rpm - 600) / (v.p.redlineRpm - 600)),
-      gear: v.powertrain.gearLabel,
-      signalLeft: this.signal === 'left',
-      signalRight: this.signal === 'right',
-      blinkPhase: this.blinkPhase,
-      headlights: this.headlights,
-      hazards: this.hazards,
-      handbrake: v.handbrakeOn || v.gear === 'P',
-      abs: v.absActive,
-      wipers: this.wipers,
-      scanAge: this.simTime - this.lastMirrorCheck,
-      street: loc.street,
-      area: loc.area,
-    });
+    // The UI needs readable updates, not a DOM rewrite at monitor refresh rate.
+    this.hudElapsed += dt;
+    if (this.hudElapsed >= 1 / 20) {
+      this.hudElapsed %= 1 / 20;
+      const loc = this.world.locationAt(v.x, v.z);
+      this.hud.update({
+        speedKmh: v.speedKmh,
+        limitKmh: this.world.speedLimitAt(v.x, v.z),
+        rpmFrac: clamp01((v.rpm - 600) / (v.p.redlineRpm - 600)),
+        gear: v.powertrain.gearLabel,
+        signalLeft: this.signal === 'left',
+        signalRight: this.signal === 'right',
+        blinkPhase: this.blinkPhase,
+        headlights: this.headlights,
+        hazards: this.hazards,
+        handbrake: v.handbrakeOn || v.gear === 'P',
+        abs: v.absActive,
+        wipers: this.wipers,
+        scanAge: this.simTime - this.lastMirrorCheck,
+        street: loc.street,
+        area: loc.area,
+      });
 
-    this.minimap?.update({ x: v.x, z: v.z, heading: v.heading }, this.routeOverlay ?? undefined, this.mapMarkers);
+      this.minimap?.update({ x: v.x, z: v.z, heading: v.heading }, this.routeOverlay ?? undefined, this.mapMarkers);
+    }
 
     // main render (bloom composer at high tiers)
     this.renderer.setScissorTest(false);
@@ -602,7 +640,10 @@ export class Engine {
       this.renderer.setScissorTest(true);
       this.renderer.setScissor(x, window.innerHeight - y - h, w, h);
       this.renderer.setViewport(x, window.innerHeight - y - h, w, h);
+      const autoUpdate = this.renderer.shadowMap.autoUpdate;
+      this.renderer.shadowMap.autoUpdate = false;
       this.renderer.render(this.scene, this.rearCam);
+      this.renderer.shadowMap.autoUpdate = autoUpdate;
       this.renderer.setScissorTest(false);
       this.renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
       this.hud.layoutMirror(x, y, w, h, true);
@@ -612,19 +653,24 @@ export class Engine {
   }
 
   private onResize(): void {
+    this.renderer.setPixelRatio(renderPixelRatio(this.tier, window.innerWidth, window.innerHeight, devicePixelRatio));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.composer?.setPixelRatio(this.renderer.getPixelRatio());
     this.composer?.setSize(window.innerWidth, window.innerHeight);
     this.camera.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.camera.updateProjectionMatrix();
   }
 
   start(): void {
+    if (this.running) return;
+    this.running = true;
     this.spawnAt(this.world.spawn());
-    this.clockPrev = performance.now();
-    this.raf = requestAnimationFrame(this.frame);
+    this.clockPrev = 0;
+    if (!document.hidden) this.raf = requestAnimationFrame(this.frame);
   }
 
   stop(): void {
+    this.running = false;
     cancelAnimationFrame(this.raf);
   }
 }
