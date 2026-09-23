@@ -145,6 +145,11 @@ export class CityWorld implements WorldBase {
     return { street: hit.lane.edge.def.name, area: hit.lane.edge.def.area };
   }
 
+  laneAt(x: number, z: number, heading: number): { heading: number; lateral: number } | null {
+    const hit = this.net.nearestLane({ x, z }, heading, 6);
+    return hit ? { heading: headingOf(hit.dir), lateral: hit.lateral } : null;
+  }
+
   spawn(): VehiclePose {
     const lane = this.net.laneById(`${SPAWNS.freeRoam.edgeId}:F${SPAWNS.freeRoam.lane}`);
     if (!lane) return { x: 0, z: 0, heading: 0 };

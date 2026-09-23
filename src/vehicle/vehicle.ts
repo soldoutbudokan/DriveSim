@@ -207,6 +207,23 @@ export class Vehicle {
     return next;
   }
 
+  /** Maximum road-wheel angle available at the current speed (rad). */
+  get maxSteerNow(): number {
+    return this.p.maxSteer / (1 + Math.abs(this.vx) / this.p.steerSpeedRef);
+  }
+
+  /**
+   * Normalized steer input (0..1] that asks for roughly `gLat` of cornering
+   * at the current speed. Keyboard steering is capped with this so a held
+   * key turns briskly without spinning the car at highway speed.
+   */
+  steerLimitFor(gLat: number): number {
+    const v = Math.abs(this.vx);
+    if (v < 1) return 1;
+    const want = (gLat * G * (this.p.a + this.p.b)) / (v * v);
+    return clamp(want / this.maxSteerNow, 0.05, 1);
+  }
+
   private mapPedals(input: InputState): void {
     this.accelPedal = input.throttle;
     this.brakePedal = input.brake;
@@ -219,9 +236,7 @@ export class Vehicle {
     this.mapPedals(input);
 
     // Steering: speed-sensitive authority + rate-limited motion toward target.
-    const speedAbs = Math.abs(this.vx);
-    const maxSteer = this.p.maxSteer / (1 + speedAbs / this.p.steerSpeedRef);
-    const target = clamp(input.steer, -1, 1) * maxSteer;
+    const target = clamp(input.steer, -1, 1) * this.maxSteerNow;
     const rate = this.p.steerRate * (Math.abs(target) < Math.abs(this.steer) ? 1.7 : 1);
     this.steer += clamp(target - this.steer, -rate * dt, rate * dt);
 

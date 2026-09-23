@@ -17,6 +17,8 @@ export interface CamTargetState {
   speed: number;
   vx: number;
   pitchSlope: number;
+  /** Yaw rate (rad/s, +left) — the chase camera looks into turns. */
+  yawRate?: number;
 }
 
 export type Glance = 'none' | 'shoulderLeft' | 'shoulderRight' | 'mirror';
@@ -27,12 +29,15 @@ export class CameraRig {
   readonly camera: THREE.PerspectiveCamera;
   mode: CameraMode = 'chase';
   reducedMotion = false;
+  /** Main-menu beauty shot: a slow orbit with the car framed right of centre. */
+  showcase = false;
 
   private glance: Glance = 'none';
   private glanceT = 0;
   private pos = new THREE.Vector3(0, 4, -8);
   private lookAt = new THREE.Vector3();
   private yawSmooth = 0;
+  private turnLook = 0;
   private fovSmooth = 62;
   private shake = 0;
   private freeMode = false;
@@ -40,6 +45,9 @@ export class CameraRig {
   private freePitch = 0.45;
   private freeDist = 18;
   private dragging = false;
+  private showcaseYaw = 2.4;
+  private snapNext = false;
+  private viewOffset = false;
 
   constructor(aspect: number) {
     this.camera = new THREE.PerspectiveCamera(62, aspect, 0.1, 2400);
@@ -100,6 +108,11 @@ export class CameraRig {
     };
   }
 
+  /** Jump straight to the chase position next frame (after a spawn/teleport). */
+  snap(): void {
+    this.snapNext = true;
+  }
+
   addShake(amount: number): void {
     this.shake = Math.min(this.shake + amount, 0.5);
   }
@@ -117,44 +130,70 @@ export class CameraRig {
       return;
     }
 
+    if (this.showcase) {
+      this.showcaseYaw += dt * 0.09;
+      const a = t.heading + this.showcaseYaw;
+      this.pos.set(t.x + Math.sin(a) * 8.2, t.y + 2.1, t.z + Math.cos(a) * 8.2);
+      this.lookAt.set(t.x, t.y + 0.75, t.z);
+      this.yawSmooth = t.heading;
+      this.camera.position.copy(this.pos);
+      this.camera.lookAt(this.lookAt);
+      this.camera.fov = 42;
+      // shift the projection so the car sits in the right half, clear of the menu
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      if (w > 760) this.camera.setViewOffset(w, h, -w * 0.2, 0, w, h);
+      else this.camera.clearViewOffset();
+      this.viewOffset = true;
+      this.camera.updateProjectionMatrix();
+      return;
+    }
+    if (this.viewOffset) {
+      this.viewOffset = false;
+      this.camera.clearViewOffset();
+    }
+
     const f = headingForward(t.heading);
     const l = headingLeft(t.heading);
-    this.yawSmooth = dampAngle(this.yawSmooth, t.heading, this.mode === 'cockpit' ? 18 : 5.5, dt);
+    if (this.snapNext) this.yawSmooth = t.heading;
+    this.yawSmooth = dampAngle(this.yawSmooth, t.heading, this.mode === 'cockpit' ? 18 : 6.5, dt);
+    this.turnLook = damp(this.turnLook, clamp((t.yawRate ?? 0) * 0.45, -0.3, 0.3), 3, dt);
     const fs = headingForward(this.yawSmooth);
 
     // glance progression 0..1..0
     const gPhase = this.glanceT > 0 ? Math.min(1, (GLANCE_TIME - this.glanceT) / 0.14, this.glanceT / 0.18) : 0;
 
     if (this.mode === 'chase') {
-      const dist = 7.4 + t.speed * 0.06;
-      const height = 2.7 + t.speed * 0.012;
+      // Sit a little high and aim well down the road, so the car sits in
+      // the lower third and lanes, signals and crossings ahead stay in view.
+      const dist = 6.9 + t.speed * 0.05;
+      const height = 3.05 + t.speed * 0.012;
+      const ahead = 9 + t.speed * 0.3;
+      const fl = headingForward(t.heading + this.turnLook);
       let px = t.x - fs.x * dist;
       let pz = t.z - fs.z * dist;
       let py = t.y + height;
-      let lx = t.x + f.x * 4;
-      let lz = t.z + f.z * 4;
-      let ly = t.y + 1.0;
+      let lx = t.x + fl.x * ahead;
+      let lz = t.z + fl.z * ahead;
+      let ly = t.y + 1.15;
 
-      if (gPhase > 0) {
-        // swing the camera to look over the shoulder / behind
-        const side = this.glance === 'shoulderLeft' ? 1 : this.glance === 'shoulderRight' ? -1 : 0;
-        if (this.glance === 'mirror') {
-          // rear view: camera moves ahead of car looking back
-          px = lerp(px, t.x + f.x * 8, gPhase);
-          pz = lerp(pz, t.z + f.z * 8, gPhase);
-          py = lerp(py, t.y + 2.2, gPhase);
-          lx = lerp(lx, t.x - f.x * 6, gPhase);
-          lz = lerp(lz, t.z - f.z * 6, gPhase);
-        } else {
-          px = lerp(px, t.x + f.x * 2.4 - l.x * side * 1.2, gPhase);
-          pz = lerp(pz, t.z + f.z * 2.4 - l.z * side * 1.2, gPhase);
-          py = lerp(py, t.y + 1.6, gPhase);
-          lx = lerp(lx, t.x - f.x * 7 + l.x * side * 7, gPhase);
-          lz = lerp(lz, t.z - f.z * 7 + l.z * side * 7, gPhase);
-          ly = t.y + 1.2;
-        }
+      // Shoulder checks swing the camera to look over that shoulder. Mirror
+      // checks leave it alone — the rear-view inset already shows behind.
+      if (gPhase > 0 && this.glance !== 'mirror') {
+        const side = this.glance === 'shoulderLeft' ? 1 : -1;
+        px = lerp(px, t.x + f.x * 2.4 - l.x * side * 1.2, gPhase);
+        pz = lerp(pz, t.z + f.z * 2.4 - l.z * side * 1.2, gPhase);
+        py = lerp(py, t.y + 1.6, gPhase);
+        lx = lerp(lx, t.x - f.x * 7 + l.x * side * 7, gPhase);
+        lz = lerp(lz, t.z - f.z * 7 + l.z * side * 7, gPhase);
+        ly = t.y + 1.2;
       }
 
+      if (this.snapNext) {
+        this.snapNext = false;
+        this.pos.set(px, py, pz);
+        this.lookAt.set(lx, ly, lz);
+      }
       const lam = 7;
       this.pos.x = damp(this.pos.x, px, lam, dt);
       this.pos.y = damp(this.pos.y, py, lam, dt);

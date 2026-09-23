@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Vehicle, type GroundSample } from '../src/vehicle/vehicle';
 import type { InputState } from '../src/controls/input';
+import { laneAlignSteer } from '../src/vehicle/assist';
 
 const flat = (): GroundSample => ({ height: 0, mu: 1, offRoad: false, dragExtra: 0 });
 /** 8% uphill grade for a car heading +z (heading 0). */
@@ -152,5 +153,32 @@ describe('grade physics (hill starts)', () => {
     run(v, 1, input({ throttle: 0.5 }), hill);
     run(v, 4, input({ throttle: 0.8 }), hill);
     expect(v.vx).toBeGreaterThan(5);
+  });
+});
+
+describe('steering assist', () => {
+  const straight = { heading: 0, lateral: 0 };
+  const cruise = (): Vehicle => {
+    const v = new Vehicle();
+    run(v, 5, input({ throttle: 0.6 }));
+    v.heading = 0.07; // ~4° off the lane
+    v.yawRate = 0;
+    return v;
+  };
+
+  it('straightens a drifting car along its lane when the driver lets go', () => {
+    const v = cruise();
+    const dt = 1 / 60;
+    for (let t = 0; t < 3; t += dt) v.update(dt, input({ throttle: 0.3, steer: laneAlignSteer(v, straight) }), flat);
+    expect(Math.abs(v.heading)).toBeLessThan(0.01);
+  });
+
+  it('stands down for turns and at parking speed', () => {
+    const v = cruise();
+    v.heading = 0.5;
+    expect(laneAlignSteer(v, straight)).toBe(0);
+    const slow = new Vehicle();
+    slow.heading = 0.05;
+    expect(laneAlignSteer(slow, straight)).toBe(0);
   });
 });

@@ -108,6 +108,13 @@ export class Examiner {
     app.engine.hud.centerMsg('Mock G Road Test', 'The examiner grades silently. Listen for instructions.', false);
     app.modeTick = (dt) => this.tick(dt);
     app.onQuitDrive = () => this.abort();
+    app.onRestartDrive = () => {
+      this.cleanup();
+      this.start();
+    };
+    app.driveTitle = 'Mock G road test';
+    // control prompts only — the examiner never coaches
+    app.engine.hints = { coaching: false, since: app.engine.simTime };
     app.engine.setPaused(false);
     speak('Hello! I will be your examiner today. Follow my directions, and drive the way you normally would.');
   }
@@ -124,6 +131,7 @@ export class Examiner {
     this.app.engine.mapMarkers = [];
     this.app.modeTick = null;
     this.app.onQuitDrive = null;
+    this.app.onRestartDrive = null;
   }
 
   /* ---------------- helpers ---------------- */

@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import type { GameApp } from '../game/app';
 import { AGENT_KINDS, buildAgentOffsets, duration, FLAG, sampleAt, type ReplayPayload } from './format';
 import { buildCar, type BuiltCar } from '../vehicle/carFactory';
+import { MENU_ICON } from '../ui/menus';
 
 export class ReplayPlayer {
   private app: GameApp;
@@ -46,9 +47,11 @@ export class ReplayPlayer {
     app.mode = 'replay';
     app.engine.simulate = false;
     app.traffic.group.visible = false;
+    app.engine.hints = null;
     app.engine.hud.setVisible(true);
     app.engine.hud.clearToasts();
-    app.engine.hud.setObjective('Replay', `${payload.meta.mode} drive · drag to orbit, scroll to zoom`);
+    app.engine.hud.setObjective('');
+    document.getElementById('ui')?.classList.add('replaying');
     app.engine.weather.set(payload.meta.weather);
     app.engine.sky.cycleSpeed = 0;
     app.engine.sky.hour = payload.meta.hour;
@@ -74,6 +77,7 @@ export class ReplayPlayer {
     this.ghostKinds = [];
     this.bar?.remove();
     this.bar = null;
+    document.getElementById('ui')?.classList.remove('replaying');
     this.disposeOrbit?.();
     this.disposeOrbit = null;
     app.engine.camera.setMode('chase');
@@ -120,14 +124,14 @@ export class ReplayPlayer {
     const dur = duration(p);
     const bar = document.createElement('div');
     bar.id = 'replayBar';
-    bar.className = 'panel clickable';
+    bar.className = 'glass';
     bar.innerHTML = `
-      <button class="btn" id="rpPlay">⏸</button>
-      <select id="rpSpeed"><option>0.5</option><option selected>1</option><option>2</option><option>4</option></select>
-      <input type="range" id="rpSlider" min="0" max="${dur.toFixed(1)}" step="0.1" value="0">
-      <div class="markers" id="rpMarkers"></div>
+      <span class="rp-title">Replay <small>${p.meta.mode}</small></span>
+      <button class="btn icon" id="rpPlay" title="Play / pause">${MENU_ICON.pause}</button>
+      <select id="rpSpeed" title="Playback speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select>
+      <div class="rp-track"><input type="range" id="rpSlider" min="0" max="${dur.toFixed(1)}" step="0.1" value="0"><div class="markers" id="rpMarkers"></div></div>
       <span class="time" id="rpTime">0:00 / ${fmt(dur)}</span>
-      <button class="btn" id="rpCam">🎥 follow</button>
+      <button class="btn" id="rpCam" title="Follow cam, or drag to orbit and scroll to zoom">Follow</button>
       <button class="btn danger" id="rpExit">Exit</button>
     `;
     document.getElementById('ui')!.appendChild(bar);
@@ -137,7 +141,7 @@ export class ReplayPlayer {
     this.playBtn = bar.querySelector('#rpPlay') as HTMLElement;
     this.playBtn.onclick = () => {
       this.playing = !this.playing;
-      this.playBtn!.textContent = this.playing ? '⏸' : '▶';
+      this.playBtn!.innerHTML = this.playing ? MENU_ICON.pause : MENU_ICON.play;
     };
     (bar.querySelector('#rpSpeed') as HTMLSelectElement).onchange = (ev) => {
       this.speed = Number((ev.target as HTMLSelectElement).value);
@@ -145,13 +149,13 @@ export class ReplayPlayer {
     this.slider.oninput = () => {
       this.time = Number(this.slider!.value);
       this.playing = false;
-      this.playBtn!.textContent = '▶';
+      this.playBtn!.innerHTML = MENU_ICON.play;
     };
     (bar.querySelector('#rpExit') as HTMLElement).onclick = () => this.stop();
     const camBtn = bar.querySelector('#rpCam') as HTMLElement;
     camBtn.onclick = () => {
       this.follow = !this.follow;
-      camBtn.textContent = this.follow ? '🎥 follow' : '🎥 orbit';
+      camBtn.textContent = this.follow ? 'Follow' : 'Orbit';
       if (this.follow) {
         this.disposeOrbit?.();
         this.disposeOrbit = null;
@@ -170,7 +174,7 @@ export class ReplayPlayer {
       i.style.cursor = 'pointer';
       i.onclick = () => {
         this.time = Math.max(0, f.time - 4);
-        this.app.engine.hud.toast(`⏪ ${f.message}`, 'warn');
+        this.app.engine.hud.toast(`${fmt(f.time)} — ${f.message}`, 'warn');
       };
       markers.appendChild(i);
     }
@@ -187,7 +191,7 @@ export class ReplayPlayer {
       if (this.time >= dur) {
         this.time = dur;
         this.playing = false;
-        if (this.playBtn) this.playBtn.textContent = '▶';
+        if (this.playBtn) this.playBtn.innerHTML = MENU_ICON.play;
       }
     }
     const s = sampleAt(p, this.time, this.offsets ?? undefined);

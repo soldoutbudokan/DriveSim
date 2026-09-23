@@ -8,7 +8,7 @@ import { Engine } from '../core/engine';
 import { CityWorld } from '../world/world';
 import { TrafficManager } from '../traffic/manager';
 import { Coach } from '../coaching/coach';
-import { Menus } from '../ui/menus';
+import { Menus, MENU_ICON, escapeHtml } from '../ui/menus';
 import { loadSettings, saveSettings, type Settings } from './settings';
 import { LessonRunner } from './lessonRunner';
 import { LESSONS, MOCK_TEST_CARD } from '../scenarios/lessons';
@@ -44,6 +44,10 @@ export class GameApp {
   modeTick: ((dt: number) => void) | null = null;
   /** Called when the user quits the current drive from pause. */
   onQuitDrive: (() => void) | null = null;
+  /** Called when the user restarts the current drive from pause. */
+  onRestartDrive: (() => void) | null = null;
+  /** Pause-menu subtitle for the current drive. */
+  driveTitle = '';
 
   constructor(appEl: HTMLElement, uiEl: HTMLElement) {
     this.settings = loadSettings();
@@ -70,12 +74,12 @@ export class GameApp {
     this.engine.hooks.tick = (dt) => this.tick(dt);
     this.engine.hooks.inputEnabled = () => !this.menus.visible && this.mode !== 'menu' && this.mode !== 'replay';
     this.engine.hooks.onPauseRequest = () => {
-      if (this.mode === 'menu') return true; // swallow
+      // Esc steps back one screen; on the main menu it does nothing
       if (this.menus.visible) {
-        this.closePause();
+        this.menus.back?.();
         return true;
       }
-      this.openPause();
+      if (this.mode !== 'menu') this.openPause();
       return true;
     };
   }
@@ -88,6 +92,7 @@ export class GameApp {
   }
 
   private tick(dt: number): void {
+    this.engine.camera.showcase = this.mode === 'menu';
     if (this.mode === 'free' || this.mode === 'lesson' || this.mode === 'exam') {
       this.coach.update(dt);
       this.recorder.tick(dt);
@@ -101,22 +106,31 @@ export class GameApp {
     if (this.recorder.recording) void this.recorder.end(null, null);
     this.mode = 'menu';
     this.modeTick = null;
+    this.onQuitDrive = null;
+    this.onRestartDrive = null;
+    this.engine.hints = null;
     this.engine.hud.setVisible(false);
     this.engine.hud.setObjective('');
     this.engine.setPaused(false);
     this.menus.showMain(
       {
-        freeRoam: () => this.goFreeRoam(),
+        freeRoam: () => this.withQuickStart(() => this.goFreeRoam()),
         lessons: () => this.openLessons(),
         mockTest: () => this.openExam(),
         replays: () => this.openReplays(),
         dashboard: () => this.openDashboard(),
         settings: () => this.openSettings(() => this.showMainMenu()),
-        help: () => this.engine.hud.showHelp(true),
+        help: () => this.menus.showQuickStart(() => this.showMainMenu(), 'Got it'),
       },
       this.menuStats(),
       () => this.openProfiles(),
     );
+  }
+
+  /** Show the how-to-drive card before the very first drive, then start. */
+  withQuickStart(start: () => void): void {
+    if (this.menus.quickStartDue) this.menus.showQuickStart(start);
+    else start();
   }
 
   /** Hooked by later systems (examiner/replay/persistence). */
@@ -124,16 +138,18 @@ export class GameApp {
     const progress = loadProgress();
     const cards = LESSONS.map((l, i) => ({
       id: l.id,
-      title: l.title,
+      title: l.title.replace(/^\d+ · /, ''),
       desc: l.desc,
-      badge: progress.lessons[l.id]?.completed ? '✓ done' : `lesson ${i + 1}`,
+      num: String(i + 1),
+      badge: progress.lessons[l.id]?.completed ? 'done' : undefined,
       done: !!progress.lessons[l.id]?.completed,
     }));
     cards.push({
       id: MOCK_TEST_CARD.id,
-      title: MOCK_TEST_CARD.title,
+      title: MOCK_TEST_CARD.title.replace(/^\d+ · /, ''),
       desc: MOCK_TEST_CARD.desc,
-      badge: 'examiner',
+      num: 'G',
+      badge: progress.exams.some((e) => e.passed) ? 'passed' : undefined,
       done: progress.exams.some((e) => e.passed),
     });
     this.menus.showCards(
@@ -146,27 +162,33 @@ export class GameApp {
           return;
         }
         const lesson = LESSONS.find((l) => l.id === id);
-        if (lesson) this.lessonRunner.start(lesson);
+        if (lesson) this.withQuickStart(() => this.lessonRunner.start(lesson));
       },
       () => this.showMainMenu(),
     );
   };
   openExam: () => void = () => {
-    const el = this.menus.showCustom(`
-      <h1>Mock G Road Test</h1>
-      <p class="dim">A full DriveTest-style examination. The examiner gives spoken directions and grades
-      <b>silently</b> — no coaching. The route covers city streets, the roundabout, the school zone,
+    const el = this.menus.showCustom(
+      `
+      <div class="spread"><h1>Mock G Road Test</h1><button class="btn ghost" id="back">${MENU_ICON.back}Back</button></div>
+      <p class="lead">A full DriveTest-style examination. The examiner gives spoken directions and grades
+      <b>silently</b> — no coaching, no hints. About 7 km of city streets, the roundabout, the school zone,
       a roadside stop, the hill, parallel parking, a three-point turn, and Highway 401.</p>
-      <h2>Remember</h2>
-      <p class="dim">Mirror checks (M) every ~10 s · shoulder checks (, .) before every lane change and merge ·
-      signal 3 s early (Q/E) · full stops behind the line · 2–3 s following gap · match traffic speed when merging.
-      Collisions and dangerous actions end the test.</p>
-      <div class="row" style="margin-top:18px">
-        <button class="btn primary" id="begin">Begin the test</button>
-        <button class="btn ghost" id="back">Back</button>
+      <div class="checklist">
+        <div><kbd>M</kbd><span>Mirror check every ~10 s and before braking</span></div>
+        <div><kbd>,</kbd><kbd>.</kbd><span>Shoulder check before every lane change and merge</span></div>
+        <div><kbd>Q</kbd><kbd>E</kbd><span>Signal about 3 s before turning</span></div>
+        <div><kbd>S</kbd><span>Full stops behind the line, smooth braking</span></div>
       </div>
-    `);
-    (el.querySelector('#begin') as HTMLElement).onclick = () => this.examiner.start();
+      <p class="dim">Keep a 2–3 s gap and match traffic speed when merging. A collision or dangerous action ends the test.</p>
+      <div class="row end" style="margin-top:18px">
+        <button class="btn primary big" id="begin" data-autofocus>${MENU_ICON.play}Begin the test</button>
+      </div>
+    `,
+      true,
+      () => this.showMainMenu(),
+    );
+    (el.querySelector('#begin') as HTMLElement).onclick = () => this.withQuickStart(() => this.examiner.start());
     (el.querySelector('#back') as HTMLElement).onclick = () => this.showMainMenu();
   };
   openReplays: () => void = () => {
@@ -179,19 +201,24 @@ export class GameApp {
       const rows = metas
         .map(
           (m) => `
-        <div class="card" data-key="${m.key}">
-          <h3>${m.mode === 'exam' ? '📋 Mock test' : m.mode === 'lesson' ? '📚 Lesson' : '🚗 Free roam'}
-          ${m.score !== null ? `· ${m.score}% ${m.passed ? '✅' : '❌'}` : ''}</h3>
-          <p>${new Date(m.at).toLocaleString()} · ${Math.round(m.durationS / 60)} min · ${m.faultCount} faults</p>
-          <span class="badge locked" data-del="${m.key}" style="cursor:pointer" title="Delete">🗑</span>
+        <div class="card replay-card" data-key="${m.key}" tabindex="0">
+          <span class="card-num">${m.mode === 'exam' ? MENU_ICON.exam : m.mode === 'lesson' ? MENU_ICON.book : MENU_ICON.car}</span>
+          <h3>${m.mode === 'exam' ? 'Mock test' : m.mode === 'lesson' ? 'Lesson' : 'Free roam'}
+          ${m.score !== null ? `<span class="pill ${m.passed ? 'pass' : 'fail'}">${m.score}% ${m.passed ? 'pass' : 'fail'}</span>` : ''}</h3>
+          <p>${new Date(m.at).toLocaleString()} · ${Math.max(1, Math.round(m.durationS / 60))} min · ${m.faultCount} fault${m.faultCount === 1 ? '' : 's'}</p>
+          <button class="icon-btn" data-del="${m.key}" title="Delete this replay" aria-label="Delete this replay">✕</button>
         </div>`,
         )
         .join('');
-      const el = this.menus.showCustom(`
-        <div class="spread"><h1>🎬 Replays</h1><button class="btn ghost" id="back">← Back</button></div>
+      const el = this.menus.showCustom(
+        `
+        <div class="spread"><h1>Replays</h1><button class="btn ghost" id="back">${MENU_ICON.back}Back</button></div>
         <p class="dim">Scrub the timeline, jump to fault markers, orbit the camera. The last ${metas.length} drives are kept per profile.</p>
         <div class="card-grid">${rows}</div>
-      `);
+      `,
+        true,
+        () => this.showMainMenu(),
+      );
       (el.querySelector('#back') as HTMLElement).onclick = () => this.showMainMenu();
       el.querySelectorAll<HTMLElement>('[data-del]').forEach((b) => {
         b.onclick = (ev) => {
@@ -200,6 +227,9 @@ export class GameApp {
         };
       });
       el.querySelectorAll<HTMLElement>('[data-key]').forEach((card) => {
+        card.onkeydown = (ev) => {
+          if (ev.key === 'Enter') card.click();
+        };
         card.onclick = () => {
           void getReplay(card.dataset.key!).then((rec) => {
             if (rec) this.replayPlayer.start(rec.data as ReplayPayload);
@@ -230,22 +260,27 @@ export class GameApp {
       .map(
         (p) => `
       <div class="setting">
-        <label>${p.id === this.profiles.active.id ? '➤ ' : ''}${p.name}<span class="hint">since ${new Date(p.createdAt).toLocaleDateString()}</span></label>
+        <div class="s-label">${escapeHtml(p.name)}<span class="hint">since ${new Date(p.createdAt).toLocaleDateString()}</span></div>
         <span class="row">
-          ${p.id !== this.profiles.active.id ? `<button class="btn" data-switch="${p.id}">Use</button>` : '<span class="dim">active</span>'}
+          ${p.id !== this.profiles.active.id ? `<button class="btn" data-switch="${p.id}">Use</button>` : '<span class="pill pass">active</span>'}
           ${this.profiles.all.length > 1 ? `<button class="btn danger" data-del="${p.id}">Delete</button>` : ''}
         </span>
       </div>`,
       )
       .join('');
-    const el = this.menus.showCustom(`
-      <div class="spread"><h1>👤 Profiles</h1><button class="btn ghost" id="back">← Back</button></div>
+    const el = this.menus.showCustom(
+      `
+      <div class="spread"><h1>Profiles</h1><button class="btn ghost" id="back">${MENU_ICON.back}Back</button></div>
+      <p class="dim">Each driver keeps their own lesson progress, test scores and replays.</p>
       ${rows}
       <h2>New profile</h2>
       <div class="row"><input type="text" id="pname" placeholder="Name" maxlength="24"><button class="btn primary" id="add">Create & switch</button></div>
       <h2>Danger zone</h2>
       <div class="row"><button class="btn danger" id="reset">Reset this profile's progress & replays</button></div>
-    `);
+    `,
+      false,
+      () => this.showMainMenu(),
+    );
     (el.querySelector('#back') as HTMLElement).onclick = () => this.showMainMenu();
     el.querySelectorAll<HTMLElement>('[data-switch]').forEach((b) => {
       b.onclick = () => {
@@ -290,10 +325,6 @@ export class GameApp {
       </div>`,
       )
       .join('');
-    const t0 = r.faults.length ? r.faults[0].time : 0;
-    void t0;
-    const start = r.at;
-    void start;
     const faultRows = r.faults.length
       ? r.faults
           .map(
@@ -306,20 +337,21 @@ export class GameApp {
       ? r.recommendations
           .map(
             (rec, i) =>
-              `<div class="card" data-lesson="${rec.lessonId}"><h3>${i + 1}. ${rec.title}</h3><p>${rec.reason}</p></div>`,
+              `<button type="button" class="card" data-lesson="${rec.lessonId}"><span class="card-num">${i + 1}</span><h3>${rec.title}</h3><p>${rec.reason}</p></button>`,
           )
           .join('')
       : '<p class="dim">Nothing specific — keep your habits sharp and retake any time.</p>';
 
     const el = this.menus.showCustom(`
-      <div class="spread">
+      <div class="report-head ${r.passed ? 'pass' : 'fail'}">
+        <div class="score-ring" style="--p:${r.overall}"><b>${r.overall}<small>%</small></b></div>
         <div>
-          <h1>${r.passed ? '✅ PASS' : '❌ FAIL'} — Mock G Road Test</h1>
-          <p class="dim">${Math.round(r.durationS / 60)} min · ${r.distanceKm.toFixed(1)} km · observation score ${r.observationScore}
-          ${r.autoFail ? ` · <b style="color:var(--bad)">automatic fail: ${r.autoFail.message}</b>` : ''}
-          ${!r.autoFail && r.dangerous.length ? ` · <b style="color:var(--bad)">dangerous action recorded</b>` : ''}</p>
+          <span class="pill ${r.passed ? 'pass' : 'fail'}">${r.passed ? 'Pass' : 'Fail'}</span>
+          <h1>Mock G Road Test</h1>
+          <p class="dim">${Math.max(1, Math.round(r.durationS / 60))} min · ${r.distanceKm.toFixed(1)} km · observation score ${r.observationScore}
+          ${r.autoFail ? ` · <b class="bad">automatic fail: ${r.autoFail.message}</b>` : ''}
+          ${!r.autoFail && r.dangerous.length ? ` · <b class="bad">dangerous action recorded</b>` : ''}</p>
         </div>
-        <div class="score-big ${r.passed ? 'pass' : 'fail'}">${r.overall}%</div>
       </div>
       <h2>Assessment areas</h2>
       ${catRows}
@@ -328,12 +360,12 @@ export class GameApp {
       <h2>Work on these next</h2>
       <div class="card-grid">${recs}</div>
       <div class="row" style="margin-top:20px">
-        <button class="btn primary" id="retake">Retake the test</button>
+        <button class="btn primary" id="retake" data-autofocus>Retake the test</button>
         <button class="btn" id="replayBtn">Watch replay</button>
         <button class="btn" id="dash">Telemetry</button>
         <button class="btn ghost" id="menu">Main menu</button>
       </div>
-    `);
+    `, true, () => this.showMainMenu());
     el.querySelectorAll<HTMLElement>('[data-lesson]').forEach((card) => {
       card.onclick = () => {
         const lesson = LESSONS.find((l) => l.id === card.dataset.lesson);
@@ -370,9 +402,13 @@ export class GameApp {
     this.engine.routeOverlay = null;
     this.engine.mapMarkers = [];
     this.engine.spawnAt(this.world.spawn());
+    this.engine.hints = { coaching: true, since: this.engine.simTime };
     this.engine.hud.setVisible(true);
     this.engine.hud.clearToasts();
-    this.engine.hud.setObjective('Free roam', 'Live coaching is on — drive like the examiner is watching. P pauses.');
+    this.engine.hud.setObjective('Free roam', 'Live coaching is on — drive like the examiner is watching', { fadeAfter: 8 });
+    this.driveTitle = 'Free roam';
+    this.onQuitDrive = null;
+    this.onRestartDrive = () => this.goFreeRoam();
     this.recorder.begin('free');
     this.engine.setPaused(false);
   }
@@ -380,10 +416,19 @@ export class GameApp {
   openPause(): void {
     this.engine.setPaused(true);
     this.engine.hud.centerMsg('');
+    const restart = this.onRestartDrive;
     this.menus.showPause(
+      this.driveTitle,
       () => this.closePause(),
-      null,
+      restart
+        ? () => {
+            this.menus.hide();
+            this.engine.setPaused(false);
+            restart();
+          }
+        : null,
       () => this.openSettings(() => this.openPause()),
+      () => this.engine.hud.showHelp(),
       () => {
         this.menus.hide();
         this.onQuitDrive ? this.onQuitDrive() : this.showMainMenu();
@@ -423,6 +468,8 @@ export class GameApp {
     e.input.settings.steerSensitivity = s.steerSensitivity;
     e.input.settings.invertSteer = s.invertSteer;
     e.vehicle.assists = { ...s.assists };
+    e.steerAssist = s.steerAssist;
+    e.showHints = s.showHints;
     e.autoHeadlights = s.autoHeadlights;
     e.camera.reducedMotion = s.reducedMotion;
     this.traffic.setDensity(s.trafficDensity);

@@ -68,7 +68,7 @@ export class Coach implements RuleSink {
     if (category === 'observation') this.observationScore = Math.max(0, this.observationScore - 9);
     if (this.showFaults) {
       const label = severity === 'minor' ? '' : severity === 'major' ? ' (major)' : severity === 'dangerous' ? ' (dangerous)' : ' (automatic fail)';
-      this.engine.hud.toast(`✗ ${message}${label}`, severity === 'minor' ? 'warn' : 'warn');
+      this.engine.hud.toast(`${message}${label}`, severity === 'minor' ? 'warn' : 'bad');
       this.engine.audio.ui(severity === 'minor' ? 'warn' : 'fail');
     }
   }

@@ -9,6 +9,7 @@ import type { GameApp } from '../game/app';
 import { SERIES_STRIDE, type ReplayPayload } from '../replay/format';
 import { computeReport } from '../scoring/rubric';
 import { LESSONS } from '../scenarios/lessons';
+import { MENU_ICON } from '../ui/menus';
 
 interface SeriesView {
   n: number;
@@ -195,12 +196,12 @@ export function renderDashboard(app: GameApp, payload: ReplayPayload): void {
   const report = computeReport(payload.faults, m.observationScore, m.durationS, 0);
   const recs = report.recommendations.length
     ? report.recommendations
-        .map((r, i) => `<div class="card" data-lesson="${r.lessonId}"><h3>${i + 1}. ${r.title}</h3><p>${r.reason}</p></div>`)
+        .map((r, i) => `<button type="button" class="card" data-lesson="${r.lessonId}"><span class="card-num">${i + 1}</span><h3>${r.title}</h3><p>${r.reason}</p></button>`)
         .join('')
     : '<p class="dim">No weak areas detected on this drive — take the mock test.</p>';
 
   const el = app.menus.showCustom(`
-    <div class="spread"><h1>📈 Telemetry — ${m.mode} drive</h1><button class="btn ghost" id="back">← Back</button></div>
+    <div class="spread"><h1>Telemetry <span class="dim">· ${m.mode} drive</span></h1><button class="btn ghost" id="back">${MENU_ICON.back}Back</button></div>
     <p class="dim">${new Date(m.at).toLocaleString()} · ${Math.round(m.durationS / 60)} min · weather: ${m.weather} ·
     ${payload.faults.length} faults${m.score !== null ? ` · score ${m.score}%` : ''}</p>
     <div class="statgrid">
@@ -216,8 +217,8 @@ export function renderDashboard(app: GameApp, payload: ReplayPayload): void {
     <div class="chart" style="margin-top:12px"><div class="label">Drive path · hard events (orange) · faults (red)</div><canvas id="chMap"></canvas></div>
     <h2>Practice these next</h2>
     <div class="card-grid">${recs}</div>
-    <div class="row" style="margin-top:18px"><button class="btn primary" id="watch">🎬 Watch this drive</button></div>
-  `);
+    <div class="row" style="margin-top:18px"><button class="btn primary" id="watch">${MENU_ICON.film}Watch this drive</button></div>
+  `, true, () => app.showMainMenu());
   lineChart(el.querySelector('#chSpeed') as HTMLCanvasElement, sv, payload.faults);
   histogram(el.querySelector('#chGap') as HTMLCanvasElement, sv);
   heatmap(el.querySelector('#chMap') as HTMLCanvasElement, app, sv, payload.faults);

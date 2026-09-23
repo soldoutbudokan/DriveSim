@@ -12,6 +12,7 @@ import type { Fault } from '../core/types';
 import type { TurnCompleted } from '../coaching/context';
 import { headingForward, headingLeft, polylineAt, headingOf } from '../core/math';
 import { loadProgress, saveProgress } from './progress';
+import { MENU_ICON } from '../ui/menus';
 
 export class LessonRunner {
   private app: GameApp;
@@ -83,6 +84,12 @@ export class LessonRunner {
     this.applyTask();
     app.modeTick = (dt) => this.tick(dt);
     app.onQuitDrive = () => this.quit();
+    app.onRestartDrive = () => {
+      this.cleanup();
+      this.start(lesson);
+    };
+    app.driveTitle = lesson.title;
+    app.engine.hints = { coaching: true, since: app.engine.simTime };
     app.engine.setPaused(false);
   }
 
@@ -102,6 +109,7 @@ export class LessonRunner {
     this.app.engine.mapMarkers = [];
     this.app.modeTick = null;
     this.app.onQuitDrive = null;
+    this.app.onRestartDrive = null;
   }
 
   /* ---------------- markers ---------------- */
@@ -327,9 +335,16 @@ export class LessonRunner {
           .join('')
       : '<li class="minor"><span class="sev" style="color:var(--good)">clean</span>No faults recorded — examiner-clean drive.</li>';
 
+    const idx = LESSONS.findIndex((l) => l.id === lesson.id);
     const el = app.menus.showCustom(`
-      <h1>✅ ${lesson.title} — complete</h1>
-      <p class="dim">${Math.round(duration)}s · habits practised: ${lesson.habits.join(' · ')}</p>
+      <div class="report-head pass">
+        <div class="done-badge">${MENU_ICON.check}</div>
+        <div>
+          <span class="pill pass">Lesson complete</span>
+          <h1>${lesson.title}</h1>
+          <p class="dim">${fmtTime(duration)} · habits practised: ${lesson.habits.join(' · ')}</p>
+        </div>
+      </div>
       <div class="statgrid">
         <div class="stat"><b>${faults.length}</b><span>faults</span></div>
         <div class="stat"><b>${sum.major + sum.dangerous + sum.autofail}</b><span>major+</span></div>
@@ -338,13 +353,15 @@ export class LessonRunner {
       <h2>Fault log</h2>
       <ul class="fault-list">${faultRows}</ul>
       <div class="row" style="margin-top:18px">
-        <button class="btn primary" id="next">Next lesson</button>
+        <button class="btn primary" id="next" data-autofocus>${idx >= 0 && idx < LESSONS.length - 1 ? 'Next lesson' : 'Take the mock test'}</button>
         <button class="btn" id="retry">Retry</button>
         <button class="btn ghost" id="menu">Main menu</button>
       </div>
-    `);
+    `, true, () => {
+      this.cleanup();
+      app.showMainMenu();
+    });
     app.engine.audio.ui('good');
-    const idx = LESSONS.findIndex((l) => l.id === lesson.id);
     (el.querySelector('#next') as HTMLElement).onclick = () => {
       this.cleanup();
       if (idx >= 0 && idx < LESSONS.length - 1) this.start(LESSONS[idx + 1]);

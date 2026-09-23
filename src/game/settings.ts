@@ -11,6 +11,10 @@ export interface Settings {
   steerSensitivity: number;
   invertSteer: boolean;
   assists: { abs: boolean; tc: boolean };
+  /** Straighten along the lane when the steering keys are released. */
+  steerAssist: boolean;
+  /** Contextual key prompts above the dashboard. */
+  showHints: boolean;
   autoHeadlights: boolean;
   reducedMotion: boolean;
   trafficDensity: number;
@@ -38,6 +42,8 @@ export function defaultSettings(): Settings {
     steerSensitivity: 1,
     invertSteer: false,
     assists: { abs: true, tc: false },
+    steerAssist: true,
+    showHints: true,
     autoHeadlights: true,
     reducedMotion: false,
     trafficDensity: 1,

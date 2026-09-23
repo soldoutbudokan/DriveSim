@@ -11,7 +11,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { Emitter } from './events';
 import type { GameEvents, CameraMode } from './types';
-import { clamp, clamp01, headingForward, type V2 } from './math';
+import { clamp, clamp01, damp, headingForward, type V2 } from './math';
 import { AutoQuality, TIERS, renderPixelRatio, type Tier } from './quality';
 import { SkySystem } from '../weather/sky';
 import { SkyDome } from '../weather/skyDome';
@@ -19,6 +19,7 @@ import { WeatherSystem } from '../weather/weather';
 import { Input } from '../controls/input';
 import { Vehicle, type GroundSample, type VehiclePose } from '../vehicle/vehicle';
 import { buildCar, CarVisual } from '../vehicle/carFactory';
+import { laneAlignSteer } from '../vehicle/assist';
 import { CameraRig } from '../camera/rig';
 import { AudioManager } from '../audio/audio';
 import { Hud } from '../ui/hud';
@@ -35,6 +36,8 @@ export interface WorldBase {
   ground(x: number, z: number): GroundSample;
   speedLimitAt(x: number, z: number): number;
   locationAt(x: number, z: number): { street: string; area: string };
+  /** Travel lane under a point, matched to a heading (for the steering assist). */
+  laneAt?(x: number, z: number, heading: number): { heading: number; lateral: number } | null;
   spawn(): VehiclePose;
   update(dt: number, simTime: number, playerPos: V2): void;
   /** Called when the player hits a knockable prop (cones). */
@@ -90,6 +93,13 @@ export class Engine {
   tier: Tier = 'medium';
   /** Auto-headlights at night (toggleable in settings). */
   autoHeadlights = true;
+  /** Contextual key hints for the current drive (null = none, e.g. replay). */
+  hints: { coaching: boolean; since: number } | null = null;
+  /** Player setting: contextual key hints on/off. */
+  showHints = true;
+  /** Steering assist: straightens the car along its lane when the driver lets go. */
+  steerAssist = true;
+  private assistSteer = 0;
   private prevNight = 0;
   private composer: EffectComposer | null = null;
   private bloomPass: UnrealBloomPass | null = null;
@@ -113,6 +123,8 @@ export class Engine {
   lastMirrorCheck = -99;
   lastShoulderLeft = -99;
   lastShoulderRight = -99;
+  /** HUD scan meter baseline: a fresh drive starts with a full meter. */
+  private scanSince = 0;
 
   private signalYawAcc = 0;
   private signalOnSince = -99;
@@ -304,6 +316,7 @@ export class Engine {
     if (!this.safePose) this.safePose = this.world.spawn();
     this.vehicle.teleport(this.safePose);
     this.signal = 'off';
+    this.camera.snap();
     this.hud.toast('Respawned at the last safe spot.', 'info');
   }
 
@@ -311,6 +324,8 @@ export class Engine {
     this.vehicle.teleport(pose);
     this.safePose = { ...pose };
     this.signal = 'off';
+    this.scanSince = this.simTime;
+    this.camera.snap();
   }
 
   private handleTaps(): void {
@@ -403,6 +418,14 @@ export class Engine {
     }
   }
 
+  /** Steering assist input, eased so it never snaps the wheel. */
+  private laneAssist(dt: number): number {
+    const v = this.vehicle;
+    const lane = this.steerAssist && !this.input.steerHeld ? this.world.laneAt?.(v.x, v.z, v.heading) ?? null : null;
+    this.assistSteer = damp(this.assistSteer, laneAlignSteer(v, lane), 6, dt);
+    return this.assistSteer;
+  }
+
   private updateCollisions(dt: number): void {
     this.collisionCooldown = Math.max(0, this.collisionCooldown - dt);
     const v = this.vehicle;
@@ -464,7 +487,8 @@ export class Engine {
     const fps = elapsed > 0 ? 1 / elapsed : 60;
     this.fpsSmooth += (fps - this.fpsSmooth) * (1 - Math.exp(-elapsed * 3));
 
-    this.input.update(dt);
+    this.input.setEnabled(this.hooks.inputEnabled?.() ?? true);
+    this.input.update(dt, { speed: this.vehicle.speed, steerLimit: this.vehicle.steerLimitFor(0.7) });
     this.handleTaps();
 
     if (!this.paused) {
@@ -472,7 +496,7 @@ export class Engine {
       if (this.simulate) {
         const inputEnabled = this.hooks.inputEnabled?.() ?? true;
         const effInput = inputEnabled
-          ? this.input.state
+          ? { ...this.input.state, steer: clamp(this.input.state.steer + this.laneAssist(dt), -1, 1) }
           : { throttle: 0, brake: 0.4, steer: 0, handbrake: false, precise: false, horn: false };
 
         this.vehicle.update(dt, effInput, this.groundQuery);
@@ -560,6 +584,7 @@ export class Engine {
       speed: v.speed,
       vx: v.vx,
       pitchSlope: v.pitchSlope,
+      yawRate: this.simulate ? v.yawRate : 0,
     });
     this.sun.target.position.set(v.x, 0, v.z);
 
@@ -607,12 +632,35 @@ export class Engine {
         handbrake: v.handbrakeOn || v.gear === 'P',
         abs: v.absActive,
         wipers: this.wipers,
-        scanAge: this.simTime - this.lastMirrorCheck,
+        scanAge: this.simTime - Math.max(this.lastMirrorCheck, this.scanSince),
         street: loc.street,
         area: loc.area,
+        gamepad: this.input.gamepadActive,
       });
+      if (this.hints && this.showHints && this.simulate) {
+        const checkedAt = this.signal === 'left' ? this.lastShoulderLeft : this.signal === 'right' ? this.lastShoulderRight : -99;
+        this.hud.setHints({
+          coaching: this.hints.coaching,
+          driveTime: this.simTime - this.hints.since,
+          speedKmh: v.speedKmh,
+          gear: v.gear,
+          throttle: this.input.state.throttle,
+          signal: this.signal,
+          signalAge: this.signalAgeS,
+          // mirror → signal → shoulder check; a check just before signalling counts too
+          shoulderChecked: checkedAt >= this.signalOnSince - 3,
+          scanAge: this.simTime - Math.max(this.lastMirrorCheck, this.scanSince),
+          night: this.sky.nightFactor > 0.55,
+          headlights: this.headlights,
+          raining: this.weather.rainLevel > 0.25,
+          wipers: this.wipers,
+          emergencyBrake: this.input.emergencyBrake && v.speed > 0.5,
+        });
+      } else {
+        this.hud.setHints(null);
+      }
 
-      this.minimap?.update({ x: v.x, z: v.z, heading: v.heading }, this.routeOverlay ?? undefined, this.mapMarkers);
+      this.minimap?.update({ x: v.x, z: v.z, heading: v.heading, speed: v.speed }, this.routeOverlay ?? undefined, this.mapMarkers);
     }
 
     // main render (bloom composer at high tiers)

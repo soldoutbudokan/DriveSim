@@ -21,15 +21,16 @@ A browser-based, Toronto-flavoured driving simulator built to train for the **On
 
 ## Controls
 
-Press **`?`** in-app any time — it pins a controls panel to the right edge that stays up while you drive (press again to hide; the choice is remembered).
+The first drive opens a one-screen **How to drive** card (also on the main menu). While driving, key prompts appear above the dashboard when they're relevant — how to leave Park, the shoulder check after you signal, a mirror check when the scan meter runs out, lights at night. Press **`?`** any time to pin the full controls panel to the right edge (press again to hide; the choice is remembered). `Esc` steps back one screen in every menu.
 
 | Keyboard | Action |
 | --- | --- |
 | `W` / `↑` | Accelerate (in the selected gear) |
-| `S` / `↓` | Brake |
+| `S` / `↓` | Brake — settles at a smooth, firm stop (~0.4 g, under the examiner's harsh-braking line) |
+| `S` `S` (double-tap, hold) | Emergency stop — full braking with ABS |
 | `X` | Shift Drive ↔ Reverse (when stopped) |
-| `A` `D` / `←` `→` | Steer |
-| `Shift` | Gentle / precise throttle |
+| `A` `D` / `←` `→` | Steer — builds quickly at parking speeds, gently at highway speeds |
+| `Shift` | Gentle throttle and brake |
 | `Space` | Handbrake (hold at a stop = Park) |
 | `Q` / `E` | Left / right turn signal (auto-cancels after the turn) |
 | `,` / `.` | **Left / right shoulder (blind-spot) check** |
@@ -46,6 +47,8 @@ Press **`?`** in-app any time — it pins a controls panel to the right edge tha
 | D-pad ◀ ▶ / X (Square) | Shoulder checks / mirror check |
 | Y (Triangle) · B (Circle) · D-pad ▼ | Camera · horn · handbrake |
 | Start / Back | Pause / help |
+
+**Steering assist** (on by default, Settings → Driving): when you let go of `A`/`D` and the car is within ~8° of its lane, it eases the wheel so the car runs parallel to the lane instead of drifting. It never centres you in the lane, never fights a held key, and stands down for turns and at parking speeds.
 
 The shoulder-check and mirror-check keys are **core pedagogy**: the scoring engine checks that you performed them at the right moments (before every lane change, merge, and pull-away — merging without a shoulder check is an automatic fail, as on the real test).
 
@@ -103,7 +106,8 @@ src/
   core/        engine loop, events, math, quality tiers (auto 60 fps target)
   vehicle/     bicycle-model dynamics: Pacejka tires + friction circle, weight
                transfer, torque-converter automatic, ABS, handbrake, grade forces;
-               parametric lofted vehicle bodies (loft.ts) + the car factory
+               steering assist (assist.ts); parametric lofted vehicle bodies
+               (loft.ts) + the car factory
   physics/     2D OBB/circle collision with spatial hashing
   controls/    keyboard analog emulation + gamepad mapping
   camera/      chase / cockpit / top-down + shoulder-glance & mirror views
@@ -125,14 +129,16 @@ src/
   scenarios/   the lesson curriculum definitions
   game/        app shell, modes, lesson runner, settings, progress
   persistence/ profiles + IndexedDB replay store
-  ui/          HUD, minimap, menus, report card, styles
+  ui/          HUD, contextual key hints, minimap, menus, report card, styles
 ```
 
 **Rendering & look**: still no 3D assets — every mesh and texture is generated at runtime, but the generators do real modelling now. Vehicles are parametric lofts: a handful of side-profile curves (roof line, belt line, sill, width) are swept into a watertight hull with cut wheel arches, crease-aware normals and true glass regions in the skin, then dressed with lathe-turned tires on spoked rims, headlamp clusters behind clear lenses, wrap-around tail bars, mirrors, handles, wipers, Ontario plates and a full interior (dashboard, seats, a steering wheel that turns with your input) visible through the glazing. Paint is clear-coated and reflects an environment map baked from the sky itself. The sky is a single shader dome — zenith-to-horizon gradient, sun disc and haze, drifting cloud layer, moon and a twinkling star field — that also drives fog colour and the image-based lighting for every hour of the day/night cycle. The district is modelled block by block: glass and ribbon-window towers on storefront podiums with setbacks, parapets and mechanical penthouses; condo midrises with balconies; Toronto bay-and-gable semis with steep gables, bay windows, columned porches, railings, steps, chimneys and trimmed windows; industrial yards with corrugated sheds, roll-up doors, loading docks and chain-link; a school with a yard, courts and playground; the DriveTest centre with its lot. Facades use generated brick, shingle, corrugated-steel, curtain-wall and storefront texture sets with normal, roughness and night-emissive maps, and a macro-variation shader kills the tiling on grass and asphalt. Streets carry cobra-head lights with night light pools, wooden hydro poles with sagging wires, streetcar catenary, Ontario mast-arm signals with visors, backboards and walk/hand pedestrian heads, hydrants, Canada Post boxes, benches, transit shelters, highway guardrails, overhead gantries and high-mast lighting, a landscaped roundabout island, and a construction site with barrels, jersey barriers and an excavator. Trees are trunk-and-branch models with alpha-cut leaf cards (maple, oak, spruce), instanced with per-tree tint. Roads are multi-vertex asphalt strips with wheel-track wear, oil lines and gutter grime baked into vertex colour over aggregate normal/roughness maps, plus the full Ontario paint set, painted turn arrows, manholes and tactile curb plates; rain turns the surfaces glossy and snow whitens the ground. Pedestrians and cyclists are articulated figures with swinging limbs and pedalling legs. ACES tone mapping, MSAA on the bloom path, soft shadows with normal-bias, and a lake with rippled reflective water under a CN-Tower-style landmark and a distant skyline finish the picture.
 
-**Physics**: a dynamic single-track (bicycle) model — Pacejka lateral forces per axle, longitudinal/lateral combination through a friction circle (throttle-on understeer, handbrake oversteer emerge naturally), longitudinal weight transfer feeding axle loads, surface/weather grip multipliers, road-grade forces (hills genuinely roll back), kinematic blending below ~3.5 m/s for parking-speed sanity, 240 Hz substeps. The trainer car is tuned to driving-school spec: keyboard throttle/steering ramp in gradually, steering authority falls off with speed so you can hold a lane centre at 50 km/h, and a comfort governor caps a floored launch around 0.38 g — brisk, but under the examiner's harsh-acceleration line.
+**Physics**: a dynamic single-track (bicycle) model — Pacejka lateral forces per axle, longitudinal/lateral combination through a friction circle (throttle-on understeer, handbrake oversteer emerge naturally), longitudinal weight transfer feeding axle loads, surface/weather grip multipliers, road-grade forces (hills genuinely roll back), kinematic blending below ~3.5 m/s for parking-speed sanity, 240 Hz substeps. The trainer car is tuned to driving-school spec: keyboard throttle ramps in gradually; a held brake key settles at a firm service stop below the harsh-braking line; keyboard steering builds more slowly with speed and a held key is capped at ~0.7 g of cornering, so a tap nudges the car at 100 km/h instead of throwing it across lanes; lifting off coasts at a realistic ~0.1 g rather than braking; and a comfort governor caps a floored launch around 0.38 g — brisk, but under the examiner's harsh-acceleration line.
 
 **Traffic**: Intelligent Driver Model car-following over lane polylines with per-lane occupancy, signal obedience including amber dilemma decisions and RTOR, all-way arrival queues (the player participates), gap-accepted lane changes & mandatory merges, and right-of-way primitives shared with the coaching engine.
+
+**Interface**: a bottom-left dashboard (speed arc with the posted limit marked, Ontario limit sign, P-R-N-D selector, turn-signal arrows, status lamps and the mirror-scan meter), a round heading-up minimap that zooms out with speed and points to off-map targets, coaching toasts stacked above the map, and contextual key prompts. The chase camera sits high and aims down the road so lanes and signals ahead stay visible, and looks into turns. The main menu orbits your car; every screen works from the keyboard (`Tab`/arrows, `Enter`, `Esc`).
 
 **Examiner fairness**: smoothness and lane-keeping faults are debounced the way a human examiner perceives them — harsh acceleration needs a *sustained* 0.42 g (brief shift/grade spikes don't count), lane drift and straddling have generous deadbands with dwell times, and repositioning with your indicator on is judged by the lane-change rules rather than flagged as weaving.
 

@@ -101,9 +101,11 @@ export class Powertrain {
     if (throttle < 0.04 && speedAbs < 2.2) {
       force += p.creepForce * (1 - speedAbs / 2.5);
     }
-    // Engine braking when off throttle at speed.
+    // Engine braking when off throttle at speed. An automatic's converter
+    // slips on overrun, so lifting off only scrubs ~0.05 g — coasting to a
+    // light must not feel like braking.
     if (throttle < 0.05 && speedAbs > 2.5) {
-      force -= 18 * ratio * p.drivetrainEff / p.wheelRadius * Math.min(speedAbs, 12);
+      force -= 4.5 * ratio * p.drivetrainEff / p.wheelRadius * Math.min(speedAbs, 12);
     }
 
     // Reverse governor: parking-speed reverse only (~20 km/h).
